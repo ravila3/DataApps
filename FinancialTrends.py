@@ -15,40 +15,41 @@ st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 
 # Connection parameters
-connection_parameters = {
-    "account":  st.secrets["snowflake"]["account"], #os.getenv('SNOWFLAKE_ACCOUNT'),
-    "user": st.secrets["snowflake"]["user"],
-    "password": st.secrets["snowflake"]["password"], #os.getenv('SNOWFLAKE_PASSWORD'),
-    "warehouse": st.secrets["snowflake"]["warehouse"],
-    "database": st.secrets["snowflake"]["database"],
-    "schema": st.secrets["snowflake"]["schema"]
-}
+# connection_parameters = {
+#     "account":  st.secrets["snowflake"]["account"], #os.getenv('SNOWFLAKE_ACCOUNT'),
+#     "user": st.secrets["snowflake"]["user"],
+#     "password": st.secrets["snowflake"]["password"], #os.getenv('SNOWFLAKE_PASSWORD'),
+#     "warehouse": st.secrets["snowflake"]["warehouse"],
+#     "database": st.secrets["snowflake"]["database"],
+#     "schema": st.secrets["snowflake"]["schema"]
+# }
 
-assert connection_parameters["account"] is not None, "Account parameter is missing"
-assert connection_parameters["user"] is not None, "User parameter is missing"
-assert connection_parameters["password"] is not None, "Password parameter is missing"
+# assert connection_parameters["account"] is not None, "Account parameter is missing"
+# assert connection_parameters["user"] is not None, "User parameter is missing"
+# assert connection_parameters["password"] is not None, "Password parameter is missing"
 
+session = st.connection("snowflake")
 # Get the current credentials
-session = Session.builder.configs(connection_parameters).create()
+# session = Session.builder.configs(connection_parameters).create()
 # session = get_active_session()
 
-def get_line_chart(df,date,field_name,metric_name,width,height):
-    
+def get_line_chart(df,date,metric_name,value_field,width,height):
+
     hover = alt.selection_point(
-        fields=[date, field_name],
+        fields=[date, metric_name],
         nearest=True,
         on="mouseover",
         empty=False) #"none")
-    legend_selection = alt.selection_point(fields=[field_name], bind='legend')
+    legend_selection = alt.selection_point(fields=[metric_name], bind='legend')
     
-    color_encoding = alt.Color(field_name, legend=alt.Legend(title=field_name, labelLimit=400), sort=alt.EncodingSortField('total_for_order', order='descending'))
+    color_encoding = alt.Color(metric_name, legend=alt.Legend(title=metric_name, labelLimit=400), sort=alt.EncodingSortField('total_for_order', order='descending'))
     
     lines = (
         alt.Chart(df)
         .mark_line(interpolate="linear")
         .encode(
             x=alt.X(date, title='Date (PST)', axis=alt.Axis(format='%b %Y')),
-            y=alt.Y(metric_name, title=metric_name),
+            y=alt.Y(value_field, title=value_field, axis=alt.Axis(format='$,d')),
             color=color_encoding,
             opacity=alt.condition(legend_selection, alt.value(1), alt.value(0.1)),
         ).add_params(legend_selection)
@@ -56,13 +57,13 @@ def get_line_chart(df,date,field_name,metric_name,width,height):
     
     points = alt.Chart(df).mark_point().encode(
         x=date,
-        y=metric_name,
+        y=alt.Y(value_field), #metric_name,
         color=color_encoding,
         opacity=alt.condition(hover, alt.value(1), alt.value(0)),
         tooltip=[
             alt.Tooltip(date, format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
-            field_name,
-            alt.Tooltip(metric_name, format=',.0f', title=metric_name)
+            metric_name,
+            alt.Tooltip(value_field, format='$,d', title=value_field)
         ]
     ).add_params(hover)  #.interactive()
     
@@ -75,7 +76,7 @@ def main():
         submit_button = st.form_submit_button(label='Submit')
     
     if submit_button and ticker:
-        query = f"""
+        sql = f"""
 with cf as
 (
 SELECT distinct
@@ -106,7 +107,7 @@ r.cik
     else 'Other'
   end as Metric_Name
 , r.measure_description
-, (TO_NUMERIC(r.value)) AS value
+, (TRUNC(TO_NUMERIC(r.value),0)) AS value
 , ROW_NUMBER() OVER (PARTITION BY r.cik, r.period_start_date, r.period_end_date, r.covered_qtrs, tag ORDER BY ri.filed_date, r.adsh DESC) AS rn
 FROM SEC_FILINGS.cybersyn.sec_cik_index AS i
 JOIN SEC_FILINGS.cybersyn.company_index as c on (c.cik=i.cik)
@@ -128,7 +129,7 @@ WHERE
   or r.tag like '%Revenue%' or r.tag like '%Income%' )
 )
   
-select form_type, primary_ticker, company_name, period_end_date, statement, tag, measure_description, Metric_Name, value, rn--, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, sum(Value) as Value
+select form_type, primary_ticker, company_name, period_end_date, statement, tag, measure_description, Metric_Name, cast(value as integer) value, rn--, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, sum(Value) as Value
 from cf
 where value<>0 and rn=1 and Metric_Name<>'Other' --and tag not in ('RevenueFromContractWithCustomerExcludingAssessedTax','CostOfRevenue')
 --group by 1,2,3,4,5,6 --,7,8,9,10
@@ -137,12 +138,13 @@ order by period_end_date, tag desc
             """
         
         with st.spinner('Pulling 10-Q Financial Data...'):
-            df = session.sql(query).to_pandas()
+            df = session.query(sql)
             if df.empty:
                 st.write('No Data Retrieved for that Ticker')
     
         if not df.empty:
-            
+            df['VALUE'] = df['VALUE'].astype(int)
+            # st.write(df) ################ debug purposes only
             chart=get_line_chart(df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,600)
             
             company_name = df['COMPANY_NAME'].iloc[0] if not df.empty else 'Unknown Company'
@@ -166,17 +168,15 @@ order by period_end_date, tag desc
             
             # Execute the query
             with st.spinner('Running LLM Analysis to provide a summary...'):
-                analysis_result = session.sql(analysis_query).collect()
+                analysis_result = session.query(analysis_query)
             
+            analysis_result_text=analysis_result.iloc[0,0]
+            # st.write(analysis_result_text) ######## debug purposes only
+
             # Print the result
             st.markdown('<h3 style="color:#3894f0;">Summary of key financial trends from LLM Analysis:</h3>', unsafe_allow_html=True)
-        
-            for row in analysis_result:
-                # st.markdown(f"**Summary of key trends:**\n\n{row[0]}")
-                summary_text = row[0]
-                summary_text = summary_text.replace('$', '\\$')
-
-                st.markdown(summary_text)
+            analysis_result_text = analysis_result_text.replace('$', '\\$')
+            st.markdown(analysis_result_text)
 
             # And write out the dataframe
             st.markdown('<h3 style="color:#3894f0;">Raw SEC 10-Q data collected from Cybersyn:</h3>', unsafe_allow_html=True)            
