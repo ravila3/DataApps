@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from altair.expr import *
-from snowflake.snowpark.functions import col
+# from snowflake.snowpark.functions import col
 
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
@@ -18,7 +18,7 @@ st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded S
 #     "schema": st.secrets["snowflake"]["schema"]
 # }
 
-session = st.connection("snowflake")
+conn = st.connection("snowflake")
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
 
@@ -125,7 +125,7 @@ order by period_end_date, tag desc
             """
         
         with st.spinner('Pulling 10-Q Financial Data...'):
-            df = session.query(sql)
+            df = conn.query(sql)
             if df.empty:
                 st.write('No Data Retrieved for that Ticker')
     
@@ -155,7 +155,7 @@ order by period_end_date, tag desc
             
             # Execute the query
             with st.spinner('Running LLM Analysis to provide a summary...'):
-                analysis_result = session.query(analysis_query)
+                analysis_result = conn.query(analysis_query)
             
             analysis_result_text=analysis_result.iloc[0,0]
             # st.write(analysis_result_text) ######## debug purposes only
