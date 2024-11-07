@@ -2,8 +2,7 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-# import snowflake as snowpark
-# import snowflake.snowpark as snowpark
+import snowflake as snowflake
 import os
 from snowflake.snowpark import Session
 from snowflake.snowpark.functions import call_builtin
