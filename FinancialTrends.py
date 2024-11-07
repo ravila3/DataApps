@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from altair.expr import *
+from snowflake.snowpark.functions import col
 
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )

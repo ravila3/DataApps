@@ -1,1 +1,2 @@
-snowflake-snowpark-python==1.23.0
+snowflake-connector-python
+snowflake-snowpark-python
