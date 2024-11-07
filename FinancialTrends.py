@@ -2,19 +2,12 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-# import snowflake as snowflake
-import os
-
-from snowflake.snowpark import Session
-from snowflake.snowpark.functions import call_builtin
-from snowflake.snowpark.context import get_active_session
 from altair.expr import *
 
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 
-# Connection parameters
 # connection_parameters = {
 #     "account":  st.secrets["snowflake"]["account"], #os.getenv('SNOWFLAKE_ACCOUNT'),
 #     "user": st.secrets["snowflake"]["user"],
@@ -24,14 +17,7 @@ st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded S
 #     "schema": st.secrets["snowflake"]["schema"]
 # }
 
-# assert connection_parameters["account"] is not None, "Account parameter is missing"
-# assert connection_parameters["user"] is not None, "User parameter is missing"
-# assert connection_parameters["password"] is not None, "Password parameter is missing"
-
 session = st.connection("snowflake")
-# Get the current credentials
-# session = Session.builder.configs(connection_parameters).create()
-# session = get_active_session()
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
 
@@ -183,6 +169,5 @@ order by period_end_date, tag desc
             st.dataframe(df)
 
     return()
-
 
 main()
