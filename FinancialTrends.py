@@ -4,6 +4,7 @@ import pandas as pd
 import altair as alt
 # import snowflake as snowflake
 from altair.expr import *
+
 # from snowflake.snowpark.functions import col
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
@@ -18,8 +19,8 @@ st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded S
 #     "schema": st.secrets["snowflake"]["schema"]
 # }
 
-conn = st.connections.SnowflakeConnection("snowflake")
-# conn = st.connection("snowflake")
+# conn = st.connections.SnowflakeConnection("snowflake")
+conn = st.connection("snowflake")
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
 
