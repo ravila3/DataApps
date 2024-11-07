@@ -2,9 +2,9 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
+import snowflake as snowflake
 from altair.expr import *
-# from snowflake.snowpark.functions import col
-
+from snowflake.snowpark.functions import col
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
