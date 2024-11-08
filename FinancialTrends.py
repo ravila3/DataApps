@@ -21,7 +21,14 @@ st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded S
 # }
 
 # conn=snowflake.connector.connect(**snowflake_config)
-conn = st.connection("snowflake")
+# conn = st.connection("snowflake")
+
+conn = snowflake.connector.connect(**st.secrets["snowflake"])
+
+@st.cache_data(ttl="20m")
+def retrieve_data(sql):
+    df = pd.read_sql(sql,conn)
+    return df
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
 
@@ -128,14 +135,15 @@ order by period_end_date, tag desc
             """
         
         with st.spinner('Pulling 10-Q Financial Data...'):
-            df = conn.query(sql)
+            df = retrieve_data(sql)
+            # df = conn.query(sql)
             if df.empty:
                 st.write('No Data Retrieved for that Ticker')
     
         if not df.empty:
             df['VALUE'] = df['VALUE'].astype(int)
             # st.write(df) ################ debug purposes only
-            chart=get_line_chart(df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,600)
+            chart=get_line_chart(df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,400)
             
             company_name = df['COMPANY_NAME'].iloc[0] if not df.empty else 'Unknown Company'
             st.write(f"Chart of Key Financials for {company_name}, ticker '{ticker}'")
@@ -158,7 +166,8 @@ order by period_end_date, tag desc
             
             # Execute the query
             with st.spinner('Running LLM Analysis to provide a summary...'):
-                analysis_result = conn.query(analysis_query)
+                analysis_result = retrieve_data(analysis_query)
+                # analysis_result = conn.query(analysis_query)
             
             analysis_result_text=analysis_result.iloc[0,0]
             # st.write(analysis_result_text) ######## debug purposes only
