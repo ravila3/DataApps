@@ -10,6 +10,7 @@ from altair.expr import *
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
+st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, and ')
 
 # snowflake_config = {
 #     "account":  st.secrets["snowflake"]["account"],
