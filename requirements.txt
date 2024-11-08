@@ -1,1 +1,3 @@
-conn = snowflake.connector.connect(**st.secrets["snowflake"])
+streamlit
+snowflake-connector-python
+snowflake-snowpark-python
