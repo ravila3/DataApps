@@ -11,16 +11,16 @@ from altair.expr import *
 st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 
-# connection_parameters = {
-#     "account":  st.secrets["snowflake"]["account"], #os.getenv('SNOWFLAKE_ACCOUNT'),
+# snowflake_config = {
+#     "account":  st.secrets["snowflake"]["account"],
 #     "user": st.secrets["snowflake"]["user"],
-#     "password": st.secrets["snowflake"]["password"], #os.getenv('SNOWFLAKE_PASSWORD'),
+#     "password": st.secrets["snowflake"]["password"],
 #     "warehouse": st.secrets["snowflake"]["warehouse"],
 #     "database": st.secrets["snowflake"]["database"],
 #     "schema": st.secrets["snowflake"]["schema"]
 # }
 
-conn=snowflake.connector.connect(**)
+# conn=snowflake.connector.connect(**snowflake_config)
 conn = st.connection("snowflake")
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
