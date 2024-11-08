@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
+import snowflake.connector
 # import snowflake as snowflake
 from altair.expr import *
 
@@ -19,7 +20,7 @@ st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded S
 #     "schema": st.secrets["snowflake"]["schema"]
 # }
 
-# conn = st.connections.SnowflakeConnection("snowflake")
+conn=snowflake.connector.connect(**)
 conn = st.connection("snowflake")
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
