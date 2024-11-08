@@ -93,7 +93,7 @@ r.cik
 , r.tag
 , case
     when r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax') then 'Sales/Revenue'
-    when r.tag in ('OperatingIncomeLoss','InterestExpenseOperating') then 'Operating Income'
+    when r.tag in ('OperatingIncomeLoss','IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest') then 'Operating Income'
     when r.tag in ('NetIncomeLoss','NetIncomeLossAvailableToCommonStockholdersBasic') then 'Net Income'
     when r.tag='CostOfRevenue' then 'Cost of Sales'
     when r.tag in ('CostsAndExpenses','BenefitsLossesAndExpenses') then 'Operating Costs'
@@ -123,7 +123,7 @@ WHERE
   AND r.statement in ('Income Statement')-- ,'Balance Sheet','Cash Flow'
   AND form_type='10-Q'
   AND r.metadata is null -- businesssegments in ('Communications') -- and subsegments is null and productorservice is null --    ,'CorporateAndOther','LatinAmericaBusinessSegment'
-  AND (r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','OperatingIncomeLoss','InterestExpenseOperating','NetIncomeLoss','CostsAndExpenses','BenefitsLossesAndExpenses','InterestExpense','Revenues','InterestIncomeExpenseNet','NoninterestIncome','InterestAndDividendIncomeOperating')
+  AND (r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','OperatingIncomeLoss','IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest','InterestExpenseOperating','NetIncomeLoss','CostsAndExpenses','BenefitsLossesAndExpenses','InterestExpense','Revenues','InterestIncomeExpenseNet','NoninterestIncome','InterestAndDividendIncomeOperating')
   or r.tag like '%Revenue%' or r.tag like '%Income%' )
 )
   
