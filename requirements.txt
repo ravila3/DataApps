@@ -1,0 +1,1 @@
+conn = snowflake.connector.connect(**st.secrets["snowflake"])
