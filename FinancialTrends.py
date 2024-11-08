@@ -127,11 +127,11 @@ WHERE
   or r.tag like '%Revenue%' or r.tag like '%Income%' )
 )
   
-select form_type, primary_ticker, company_name, period_end_date, statement, tag, measure_description, Metric_Name, cast(value as integer) value, rn--, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, sum(Value) as Value
+select form_type, primary_ticker, company_name, period_end_date, statement, Metric_Name, max(cast(value as integer)) as value  --, tag, measure_description, rn, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, max(Value) as Value
 from cf
 where value<>0 and rn=1 and Metric_Name<>'Other' --and tag not in ('RevenueFromContractWithCustomerExcludingAssessedTax','CostOfRevenue')
---group by 1,2,3,4,5,6 --,7,8,9,10
-order by period_end_date, tag desc
+group by 1,2,3,4,5,6
+order by period_end_date desc
 --limit 100
             """
         
