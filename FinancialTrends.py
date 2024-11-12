@@ -24,11 +24,11 @@ st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Fi
 # conn=snowflake.connector.connect(**snowflake_config)
 # conn = st.connection("snowflake")
 
-conn = snowflake.connector.connect(**st.secrets["snowflake"])
-
 @st.cache_data(ttl="20m")
 def retrieve_data(sql):
+    conn = snowflake.connector.connect(**st.secrets["snowflake"])
     df = pd.read_sql(sql,conn)
+    conn.close()
     return df
 
 def get_line_chart(df,date,metric_name,value_field,width,height):
