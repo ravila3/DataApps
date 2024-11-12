@@ -74,6 +74,7 @@ def main():
         submit_button = st.form_submit_button(label='Submit')
     
     if submit_button and ticker:
+        ticker_cleaned=ticker.replace(" ","").upper()
         sql = f"""
 with cf as
 (
@@ -112,7 +113,7 @@ JOIN SEC_FILINGS.cybersyn.company_index as c on (c.cik=i.cik)
 JOIN SEC_FILINGS.cybersyn.sec_report_attributes AS r ON (r.cik = i.cik)
 JOIN SEC_FILINGS.cybersyn.sec_report_index as ri on (ri.adsh=r.adsh)
 WHERE 
-  c.primary_ticker='{ticker.upper()}'
+  c.primary_ticker='{ticker_cleaned}'
 --  i.company_name like '%AT&T%' --'AMR CORP'
 --  AND i.sic_code_description = 'AIR TRANSPORTATION, SCHEDULED'
   AND r.period_end_date >= '2010-01-01'
@@ -139,7 +140,7 @@ order by period_end_date desc
             df = retrieve_data(sql)
             # df = conn.query(sql)
             if df.empty:
-                st.write('No Data Retrieved for that Ticker')
+                st.write(f"No Data Retrieved for stock ticker '{ticker_cleaned}'")
     
         if not df.empty:
             df['VALUE'] = df['VALUE'].astype(int)
@@ -147,7 +148,7 @@ order by period_end_date desc
             chart=get_line_chart(df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,400)
             
             company_name = df['COMPANY_NAME'].iloc[0] if not df.empty else 'Unknown Company'
-            st.write(f"Chart of Key Financials for {company_name}, ticker '{ticker}'")
+            st.write(f"Chart of Key Financials for {company_name}, stock ticker '{ticker_cleaned}'")
             st.altair_chart(chart, use_container_width=True)
 
             # Now create the LLM Summary
