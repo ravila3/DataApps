@@ -145,7 +145,7 @@ order by period_end_date desc
         if not df.empty:
             df['VALUE'] = df['VALUE'].astype(int)
             # st.write(df) ################ debug purposes only
-            chart=get_line_chart(df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,400)
+            chart=get_line_chart(df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,300)
             
             company_name = df['COMPANY_NAME'].iloc[0] if not df.empty else 'Unknown Company'
             st.write(f"Chart of Key Financials for {company_name}, stock ticker '{ticker_cleaned}'")
