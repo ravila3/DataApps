@@ -30,21 +30,11 @@ st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded S
 st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by Cybersyn')
 
 @st.cache_data(ttl="60m")
-def retrieve_data(_conn,sql):
-    df = pd.read_sql(sql,_conn)
+def retrieve_data(sql):
+    conn = snowflake.connector.connect(**st.secrets["snowflake"])
+    df = pd.read_sql(sql,conn)
+    conn.close()
     return df
-
-@st.cache_data(ttl="60m")
-def retrieve_llm(_conn,query): 
-    cursor = _conn.cursor()
-    cursor.execute(query)
-    results = cursor.fetchone() 
-    cursor.close() 
-    # st.write(response) #debug
-    response = results[0].replace('"', '')
-    # message = {"role": "assistant", "content": response}
-    # ss.messages.append(message) # Add response to message history
-    return response
 
 def get_line_chart(tdf,date,metric_name,value_field,width,height):
 
@@ -88,8 +78,6 @@ def get_line_chart(tdf,date,metric_name,value_field,width,height):
 
 def main():
 
-    _conn = snowflake.connector.connect(**st.secrets["snowflake"])
-
     with st.form("ticker_form"):
         ss.ticker = st.text_input('Enter Stock Ticker', value='MSFT')
         submit_button = st.form_submit_button(label='Submit')
@@ -122,16 +110,16 @@ r.cik
 , r.statement
 , r.tag
 , case
-    when r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax') then 'Sales/Revenue'
-    when r.tag in ('OperatingIncomeLoss','IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest') then 'Operating Income'
+    when r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','Revenues','InvestmentIncomeInterestAndDividend','InterestAndDividendIncomeOperating') then 'Sales/Revenue'
+    when r.tag in ('OperatingIncomeLoss','IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest','IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments') then 'Operating Income'
     when r.tag in ('NetIncomeLoss','NetIncomeLossAvailableToCommonStockholdersBasic') then 'Net Income'
     when r.tag='CostOfRevenue' then 'Cost of Sales'
     when r.tag in ('CostsAndExpenses','BenefitsLossesAndExpenses') then 'Operating Costs'
     when r.tag='InterestAndDividendIncomeOperating' then 'Interest and Dividend Income'
-    when r.tag='InterestExpense' then 'Interest Expense'
+    when r.tag in ('InterestExpense','InterestExpenseOperating','InterestExpenseNonoperating') then 'Interest Expense'
     when r.tag='InterestIncomeExpenseNet' then 'Interest Net Income'
     when r.tag='NoninterestIncome' then 'Non-Interest Income'
-    when r.tag='Revenues' then 'Revenues'
+    -- when r.tag='Revenues' then 'Revenues'
     else 'Other'
   end as Metric_Name
 , r.measure_description
@@ -153,7 +141,10 @@ WHERE
   AND r.statement in ('Income Statement')-- ,'Balance Sheet','Cash Flow'
   AND form_type='10-Q'
   AND r.metadata is null -- businesssegments in ('Communications') -- and subsegments is null and productorservice is null --    ,'CorporateAndOther','LatinAmericaBusinessSegment'
-  AND (r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','OperatingIncomeLoss','IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest','InterestExpenseOperating','NetIncomeLoss','CostsAndExpenses','BenefitsLossesAndExpenses','InterestExpense','Revenues','InterestIncomeExpenseNet','NoninterestIncome','InterestAndDividendIncomeOperating')
+  AND (r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','OperatingIncomeLoss'
+        ,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest','InterestExpenseOperating','NetIncomeLoss','CostsAndExpenses','BenefitsLossesAndExpenses'
+        ,'InterestExpense','InterestExpenseNonoperating','Revenues','InterestIncomeExpenseNet','NoninterestIncome','InterestAndDividendIncomeOperating'
+        ,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments')
   or r.tag like '%Revenue%' or r.tag like '%Income%' )
 )
   
@@ -167,7 +158,7 @@ order by period_end_date desc
             """
         
         with st.spinner('Pulling 10-Q Financial Data...'):
-            ss.df = retrieve_data(_conn,sql)
+            ss.df = retrieve_data(sql)
             # ss.df=df
             # df = conn.query(sql)
             if len(ss.df)==0:
@@ -181,26 +172,10 @@ order by period_end_date desc
         # st.write(ss.df) ################ debug purposes only
         get_line_chart(ss.df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,300)
         
-        # company_name = ss.df['COMPANY_NAME'].iloc[0] if not ss.df.empty else 'Unknown Company'
-        # st.write(f"Chart of Key Financials for {company_name}, stock ticker '{ss.ticker}'")
-        # st.altair_chart(chart, use_container_width=True)
-
-        # Now create the LLM Summary
-        
-        # Convert the pandas DataFrame to JSON
-        
-        # ss.df['PERIOD_END_DATE'] = df['PERIOD_END_DATE'].dt.strftime('%Y-%m-%d')
-        
-        # escaped_data_json = data_json.replace("'", "''")
-
-        # Initialize continuous session for chat
-        # conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        # session=get_active_session()
-
         if ss.messages==[]: # Initialize the chat message history - old logic was "messages" not in ss.keys()
             ss.df['PERIOD_END_DATE'] = pd.to_datetime(ss.df['PERIOD_END_DATE']).dt.strftime('%Y-%m-%d')
             data_json = ss.df[['PERIOD_END_DATE','METRIC_NAME','VALUE']].to_json(orient='records')
-            ss.messages=[{"role":"user","content":f"""Put together a few bullets to summarize the trends of financial performance for {ss.df['COMPANY_NAME'].iloc[0]},
+            ss.messages=[{"role":"user","content":f"""Put together a few bullets to summarize the trends of financial performance for {ss.df['COMPANY_NAME'].iloc[0].replace("'","")},
                 with each bullet including average annual growth rates and any major changes in trend. Use the following data from SEC 10-Q reports,
                 where the period_end_date is time, and the metric_name tells us what financial metric the value represents.
                 Also include trends related to operating margin and net margin, and ensure calculations are correct.
@@ -213,21 +188,17 @@ order by period_end_date desc
         analysis_query = f"""
             SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2',
             '{ss.messages[0]["content"]}, temperature=0.5')  
-        """  #,temperature=0.5,guardrails=True
+        """  #,guardrails=True
 
-        # Execute the query
         with st.spinner('Running LLM Analysis to provide a summary...'):
-            ss.analysis_result = retrieve_data(_conn,analysis_query)
+            ss.analysis_result = retrieve_data(analysis_query)
             # ss.analysis_result = pd.DataFrame([["For testing, Net Income = $10000, Sales = $40000"]], columns=["Column1"]) #### DEBUG ONLY
-
-            # analysis_result = _conn.query(analysis_query)
-        
+       
         if len(ss.messages)==2 and len(ss.analysis_result)!=0:
             analysis_result_text=ss.analysis_result.iloc[0,0]
             analysis_result_text = analysis_result_text.replace('$', '\\$')
             ss.messages.append({"role":"assistant","content":analysis_result_text})
             # st.write(analysis_result_text) ######## debug purposes only
-
 
         # st.write(f"len(ss.messages)={len(ss.messages)}") # debug
         # st.write(f"len(ss.df)={len(ss.df)}") # debug
@@ -257,49 +228,37 @@ order by period_end_date desc
                     f"""Hello and welcome to Cortex Chat. Please let me know if you have any questions about these metrics for {ss.df['COMPANY_NAME'].iloc[0]}."""})
 
             # st.write(f"ss.messages[-1]={ss.messages[-1]}") # debug
-
             # st.write(f"""Just before querying LLM. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") # DEBUG
-            
+
+            # process user questions and get an LLM response
             if ss.messages[-1]["role"] == "user":
-                # st.write(f"ss.messages = {ss.messages}")
-                # with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
-                    
-                    # prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in ss.messages])
                     prompt = "\n".join([
                             f"{msg['role']}: {msg['content']}" if idx == 0 else "{}: {}".format(msg['role'], msg['content'].replace("'", "").replace('"', ''))
                             for idx, msg in enumerate(ss.messages)
                         ])
-                    # st.write(prompt)
+                    # st.write(prompt) #debug
                     sql = f"""
                     select snowflake.cortex.complete(
                         'mistral-large2', 
                         '{{"prompt": "{prompt}"}}, temperature=0.5'
                         ) as response;
                     """ 
-                    response=retrieve_llm(_conn,sql)
-                    add_response(response)
-                    # st.write(f"""Just after querying LLM. counter = {ss.counter}, ss.messages[-1]={ss.messages[-1]}""") # DEBUG
-
-                    # response = 'Response for testing' #debug
-
-                    # response = response.replace('"', '')
-                    # st.write(response) #debug
-                    # message = {"role": "assistant", "content": response}
-                    # ss.messages.append(message) # Add response to message history
-        
-                    # If last message is not from assistant, generate a new response
+                    response_df=retrieve_data(sql)
+                    response_string=response_df.iloc[0,0]
+                    response_string=response_string.replace('"', '').replace('$', '\\$')
+                    # st.write(f"response_string={response_string}") #debug
+                    add_response(response_string)
             
-            # st.write(f"""Just before msg print. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") # DEBUG
+            # st.write(f"""Just before msg print. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
             for message in ss.messages[3:]: # Display the prior chat messages
                 with st.chat_message(message["role"]):
                     st.write(message["content"])
 
-            # st.write(f"""Just before prompt. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") # DEBUG
+            # st.write(f"""Just before prompt. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
             if ss.messages[-1]["role"] == "assistant":
                 st.text_input('Enter question:', key='user_input', on_change=add_user_message)
             
             # st.write(f"""at end ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
-
 
 main()
