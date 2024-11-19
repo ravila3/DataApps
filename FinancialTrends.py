@@ -30,7 +30,7 @@ if 'messages' not in ss:
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
-st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by Cybersyn. Summary and chat powered by mistral-large2 AI model')
+st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by Cybersyn. Analysis Summary and AI chat powered by mistral-large2 AI model')
 
 @st.cache_data(ttl="24h")
 def retrieve_data(sql):
