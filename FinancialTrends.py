@@ -13,8 +13,11 @@ from snowflake.snowpark.functions import col
 connection_parameters = st.secrets["snowflake"]
 session = Session.builder.configs(connection_parameters).create()
 
-if 'ticker' not in ss:
+if 'cik' not in ss:
+    ss.cik=''
     ss.ticker=''
+    ss.company_name=''
+    ss.company_and_ticker=''
 if 'df' not in ss:
     ss.df=pd.DataFrame(columns=['Column1'])
 if 'analysis_result' not in ss:
@@ -29,7 +32,7 @@ st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by Cybersyn')
 
-@st.cache_data(ttl="60m")
+@st.cache_data(ttl="24h")
 def retrieve_data(sql):
     conn = snowflake.connector.connect(**st.secrets["snowflake"])
     df = pd.read_sql(sql,conn)
@@ -78,19 +81,29 @@ def get_line_chart(tdf,date,metric_name,value_field,width,height):
 
 def main():
 
-    with st.form("ticker_form"):
-        ss.ticker = st.text_input('Enter Stock Ticker', value='MSFT')
+    # Load company lookup table
+    sql= """Select case when primary_ticker is not null then company_name||' ('||primary_ticker||')' else company_name END as company_and_ticker
+            , company_name, primary_ticker, cik, last_filing_date
+            from Notebook.Public.cybersyn_company_lookup order by 1 """
+    company_lookup_df=retrieve_data(sql)
+    # st.write(company_lookup_df) #debug
+
+    with st.form("Company Lookup"):
+        company_and_ticker=st.selectbox('Select which company/stock ticker:',company_lookup_df['COMPANY_AND_TICKER'],index=None,placeholder='Start typing to narrow company name or ticker options')
         submit_button = st.form_submit_button(label='Submit')
 
     if len(ss.df) == 0:
         df=pd.DataFrame(columns=['Column1']) # Initialize the dataframe
     
-    if submit_button and (ticker:=ss.ticker and ss.ticker!=''):
-        ticker_cleaned=ss.ticker.replace(" ","").upper()
-        ss.ticker=ticker_cleaned
+    if submit_button and (company_and_ticker!=ss.company_and_ticker):
+        ss.company_and_ticker=company_and_ticker
+        ss.cik = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'CIK'].values[0]
+        ss.ticker = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'PRIMARY_TICKER'].values[0]
+        ss.company_name = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'COMPANY_NAME'].values[0]
         ss.df=pd.DataFrame(columns=['Column1']) # Clear out the dataframe
         ss.messages=[] # Clear out messages
         ss.counter=0 # Reset counter
+        st.write(f"cik={ss.cik}, ticker={ss.ticker}, company_name={ss.company_name}, company_and_ticker={ss.company_and_ticker}\n") #debug
         # st.subheader('Dataframe Reset due to submit button') #debug
         sql = f"""
 with cf as
@@ -103,7 +116,7 @@ r.cik
 , ri.form_type
 , ri.filed_date
 , c.primary_ticker
-, i.company_name
+, initcap(i.company_name) as company_name
 , r.period_start_date
 , r.period_end_date
 , r.covered_qtrs
@@ -130,7 +143,7 @@ JOIN SEC_FILINGS.cybersyn.company_index as c on (c.cik=i.cik)
 JOIN SEC_FILINGS.cybersyn.sec_report_attributes AS r ON (r.cik = i.cik)
 JOIN SEC_FILINGS.cybersyn.sec_report_index as ri on (ri.adsh=r.adsh)
 WHERE 
-  c.primary_ticker='{ticker_cleaned}'
+  c.cik='{ss.cik}'
 --  i.company_name like '%AT&T%' --'AMR CORP'
 --  AND i.sic_code_description = 'AIR TRANSPORTATION, SCHEDULED'
   AND r.period_end_date >= '2010-01-01'
@@ -148,11 +161,11 @@ WHERE
   or r.tag like '%Revenue%' or r.tag like '%Income%' )
 )
   
-select form_type, primary_ticker, company_name, period_end_date, statement, Metric_Name, max(cast(value as integer)) as value  --, tag, measure_description, rn, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, max(Value) as Value
+select form_type, cik, primary_ticker, company_name, period_end_date, statement, Metric_Name, max(cast(value as integer)) as value  --, tag, measure_description, rn, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, max(Value) as Value
 from cf
 where value<>0 and rn=1 and Metric_Name<>'Other' --and tag not in ('RevenueFromContractWithCustomerExcludingAssessedTax','CostOfRevenue')
 --AND period_end_date >= '2024-01-01' -- LIMIT SCOPE FOR DEVELOPMENT EFFICIENCY
-group by 1,2,3,4,5,6
+group by 1,2,3,4,5,6,7
 order by period_end_date desc
 --limit 100
             """
@@ -180,7 +193,9 @@ order by period_end_date desc
                 where the period_end_date is time, and the metric_name tells us what financial metric the value represents.
                 Also include trends related to operating margin and net margin, and ensure calculations are correct.
                 Please verify the summary against the data and note any discrepancies: {data_json}"""}]
-            ss.messages.append({"role":"system","content":"Limit the responses to only questions that are relevant to this company's performance"})
+            ss.messages.append({"role":"system","content":"""Limit the responses to only questions that are relevant to this company's performance
+                                If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
+                                but rather answer with any data you do know about the industry performance or specific competitors and their performance """})
         
             # prompt = ss.messages[-1]["content"]
             # st.write(prompt)
@@ -225,7 +240,7 @@ order by period_end_date desc
 
             if len(ss.messages)==3:
                 ss.messages.append({"role": "assistant", "content": 
-                    f"""Hello and welcome to Cortex Chat. Please let me know if you have any questions about these metrics for {ss.df['COMPANY_NAME'].iloc[0]}."""})
+                    f"""Welcome to Cortex Chat, powered by the Mistral-Large2 LLM Model. Please let me know if you have any questions about these metrics for {ss.df['COMPANY_NAME'].iloc[0]}."""})
 
             # st.write(f"ss.messages[-1]={ss.messages[-1]}") # debug
             # st.write(f"""Just before querying LLM. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") # DEBUG
