@@ -18,14 +18,11 @@ if 'cik' not in ss:
     ss.ticker=''
     ss.company_name=''
     ss.company_and_ticker=''
-if 'df' not in ss:
+    ss.llm_model=''
     ss.df=pd.DataFrame(columns=['Column1'])
-if 'analysis_result' not in ss:
     ss.analysis_result=''
-if 'counter' not in ss:
-    ss.counter=0
-if 'messages' not in ss:
     ss.messages=[]
+    ss.counter=0
 
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
@@ -35,9 +32,21 @@ st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Fi
 @st.cache_data(ttl="24h")
 def retrieve_data(sql):
     conn = snowflake.connector.connect(**st.secrets["snowflake"])
+    # st.write(f"sql = {sql}") #debug
     df = pd.read_sql(sql,conn)
     conn.close()
     return df
+
+def add_user_message():
+    # Chat input
+    ss.counter=ss.counter+1 # `DEBUG`
+    sanitized_user_input=ss.user_input.replace("'","").replace('"',"")
+    ss.messages.append({"role": "user", "content": sanitized_user_input})
+    #ss.user_input="" # clear message after sending
+    # st.write(f"just added messaage: {sanitized_user_input}") #debug
+
+def add_assistant_message(response):
+    ss.messages.append({"role": "assistant", "content": response})
 
 def get_line_chart(tdf,date,metric_name,value_field,width,height):
 
@@ -80,7 +89,7 @@ def get_line_chart(tdf,date,metric_name,value_field,width,height):
     return (lines + points) #  + tooltips
 
 def main():
-
+    print('#### Starting at top of main') #debug
     # Load company lookup table
     sql= """Select case when primary_ticker is not null then company_name||' ('||primary_ticker||')' else company_name END as company_and_ticker
             , company_name, primary_ticker, cik, last_filing_date
@@ -94,16 +103,18 @@ def main():
 
     if len(ss.df) == 0:
         df=pd.DataFrame(columns=['Column1']) # Initialize the dataframe
-    
-    if submit_button and (company_and_ticker!=ss.company_and_ticker):
+    if submit_button and company_and_ticker==None:
+        st.subheader(':red[Please select a company]')
+    if submit_button and (company_and_ticker!=None and company_and_ticker!=ss.company_and_ticker):
         ss.company_and_ticker=company_and_ticker
         ss.cik = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'CIK'].values[0]
         ss.ticker = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'PRIMARY_TICKER'].values[0]
         ss.company_name = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'COMPANY_NAME'].values[0]
         ss.df=pd.DataFrame(columns=['Column1']) # Clear out the dataframe
+        ss.analysis_result=''
         ss.messages=[] # Clear out messages
         ss.counter=0 # Reset counter
-        st.write(f"cik={ss.cik}, ticker={ss.ticker}, company_name={ss.company_name}, company_and_ticker={ss.company_and_ticker}\n") #debug
+        # st.write(f"cik={ss.cik}, ticker={ss.ticker}, company_name={ss.company_name}, company_and_ticker={ss.company_and_ticker}\n") #debug
         # st.subheader('Dataframe Reset due to submit button') #debug
         sql = f"""
 with cf as
@@ -176,6 +187,7 @@ order by period_end_date desc
             # df = conn.query(sql)
             if len(ss.df)==0:
                 st.write(f"No Data Retrieved for company '{ss.company_and_ticker}'")
+
     
     # if not df.empty:
     # st.write(f"did it meet condition for chart? len(ss.df)={len(ss.df)}") # debug
@@ -185,7 +197,8 @@ order by period_end_date desc
         # st.write(ss.df) ################ debug purposes only
         get_line_chart(ss.df,'PERIOD_END_DATE','METRIC_NAME','VALUE',700,300)
         
-        if ss.messages==[]: # Initialize the chat message history - old logic was "messages" not in ss.keys()
+        # Prep for pulling LLM Summaries
+        if ss.messages==[]: # Initialize the chat message history if no chat yet
             ss.df['PERIOD_END_DATE'] = pd.to_datetime(ss.df['PERIOD_END_DATE']).dt.strftime('%Y-%m-%d')
             data_json = ss.df[['PERIOD_END_DATE','METRIC_NAME','VALUE']].to_json(orient='records')
             ss.messages=[{"role":"user","content":f"""Put together a few bullets to summarize the trends of financial performance for {ss.df['COMPANY_NAME'].iloc[0].replace("'","")},
@@ -197,89 +210,93 @@ order by period_end_date desc
                                 If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
                                 but rather answer with any data you do know about the industry performance or specific competitors and their performance
                                 """})
+            ss.llm_model='mistral-large2'
+
+        # Pull the data based on the messages array
+        prompt = "\n".join([
+                f"{msg['role']}: {msg['content']}" if idx == 0 else "{}: {}".format(msg['role'], msg['content'].replace("'", "").replace('"', ''))
+                for idx, msg in enumerate(ss.messages)
+            ])
+        # st.write(prompt) #debug
+        sql = f"""
+        select snowflake.cortex.complete('{ss.llm_model}', 
+            '{prompt}, temperature=0.5'
+            ) as response;
+        """ 
+
+        # sql = f"""
+        # select snowflake.cortex.complete('{ss.llm_model}', 
+        #     '{{"prompt": "{prompt}"}}, temperature=0.5'
+        #     ) as response;
+        # """ 
+
+        # sql = f"""
+        #             SELECT SNOWFLAKE.CORTEX.COMPLETE({ss.llm_model},
+        #             '{ss.messages[0]["content"]}, temperature=0.5')  
+        #         """  #,guardrails=True
+
+        # st.write(f"response_string={response_string}") #debug
         
-            # prompt = ss.messages[-1]["content"]
-            # st.write(prompt)
-        # Call the Cortex `COMPLETE` function
-        analysis_query = f"""
-            SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2',
-            '{ss.messages[0]["content"]}, temperature=0.5')  
-        """  #,guardrails=True
 
-        with st.spinner('Running LLM Analysis to provide a summary...'):
-            ss.analysis_result = retrieve_data(analysis_query)
-            # ss.analysis_result = pd.DataFrame([["For testing, Net Income = $10000, Sales = $40000"]], columns=["Column1"]) #### DEBUG ONLY
-       
-        if len(ss.messages)==2 and len(ss.analysis_result)!=0:
-            analysis_result_text=ss.analysis_result.iloc[0,0]
-            analysis_result_text = analysis_result_text.replace('$', '\\$')
-            ss.messages.append({"role":"assistant","content":analysis_result_text})
-            # st.write(analysis_result_text) ######## debug purposes only
+        
+        # st.markdown(f"""before pulling summary data: len(ss.messages)={len(ss.messages)} <br> ss.messages = {ss.messages}""", unsafe_allow_html=True) #debug
 
-        # st.write(f"len(ss.messages)={len(ss.messages)}") # debug
-        # st.write(f"len(ss.df)={len(ss.df)}") # debug
+        # If no analysis results yet, pull, analysis summary
+
+        # st.write(f"Just before pulling LLM Analysis, len(ss.messages)={len(ss.messages)} and len(ss.analysis_result)={len(ss.analysis_result)}, ss.analysis_result = {ss.analysis_result}") #debug
+
+        if len(ss.messages)==2 and len(ss.analysis_result)==0:
+            with st.spinner('Running LLM Analysis to provide a summary...'):
+                response_df = retrieve_data(sql)
+            ss.analysis_result=response_df.iloc[0,0]
+            ss.analysis_result=ss.analysis_result.replace('$', '\\$')
+            ss.messages.append({"role":"assistant","content":ss.analysis_result})
+
+        # Print the summary and the dataframe
         if len(ss.messages)>=3:
-            # Print the summary
             st.markdown('<h3 style="color:#3894f0;">Summary of key financial trends from LLM Analysis:</h3>', unsafe_allow_html=True)
             st.markdown(ss.messages[2]["content"])
 
             # And write out the dataframe
             st.markdown('<h3 style="color:#3894f0;">Raw SEC 10-Q data collected from Cybersyn:</h3>', unsafe_allow_html=True)            
             st.dataframe(ss.df)
+            # st.write(analysis_result_text) ######## debug purposes only
 
-            def add_user_message():
-                # Chat input
-                ss.counter=ss.counter+1 # DEBUG
-                if ss.user_input:
-                    sanitized_user_input=ss.user_input.replace("'","")
-                    ss.messages.append({"role": "user", "content": sanitized_user_input})
-                    ss.user_input="" # clear message after sending
-                    # st.write(f"just added messaage: {sanitized_user_input}") #debug
+        #if the summary is complete, prep for the chat interactions
+        if len(ss.messages)==3:
+            ss.messages.append({"role": "assistant", "content": 
+                f"""Welcome to Cortex Chat, powered by the Mistral-Large2 LLM Model. Please let me know if you have any questions about these metrics for {ss.company_name}. I may be able to provide some limited data on industry and competitors based on the public knowledge I was trained on"""})
+            ss.messages.append({"role":"system","content":"""
+                If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
+                but rather answer with any data you do know about the industry performance or specific competitors and their performance. Do not state your role in the response.
+                """})
+
+        # st.markdown(f"""len(ss.messages)={len(ss.messages)} <br> ss.messages = {ss.messages}""", unsafe_allow_html=True) #debug                    
             
-            def add_response(response):
-                ss.messages.append({"role": "assistant", "content": response})
-
-            if len(ss.messages)==3:
-                ss.messages.append({"role": "assistant", "content": 
-                    f"""Welcome to Cortex Chat, powered by the Mistral-Large2 LLM Model. Please let me know if you have any questions about these metrics for {ss.df['COMPANY_NAME'].iloc[0]}."""})
-                ss.messages.append({"role":"system","content":"""
-                                If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
-                                but rather answer with any data you do know about the industry performance or specific competitors and their performance
-                                """})
+        # st.write(f"""Just before msg print. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
+        for message in [msg for msg in ss.messages[3:] if msg['role']!='system']: # Display the prior chat messages
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
 
 
-            # st.write(f"ss.messages[-1]={ss.messages[-1]}") # debug
-            # st.write(f"""Just before querying LLM. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") # DEBUG
+        # st.write(f"""Just before prompt. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
+        if ss.messages[-1]["role"] != "user":
+            with st.chat_message('user'):
+                st.chat_input('Enter question:', key='user_input', on_submit=add_user_message)
 
-            # process user questions and get an LLM response
-            if ss.messages[-1]["role"] == "user":
+        #if the user entered a chat last, pull result from LLM
+        if len(ss.messages)>=3 and ss.messages[-1]["role"] == "user":
+            with st.chat_message('assistant'):
                 with st.spinner("Thinking..."):
-                    prompt = "\n".join([
-                            f"{msg['role']}: {msg['content']}" if idx == 0 else "{}: {}".format(msg['role'], msg['content'].replace("'", "").replace('"', ''))
-                            for idx, msg in enumerate(ss.messages)
-                        ])
-                    # st.write(prompt) #debug
-                    sql = f"""
-                    select snowflake.cortex.complete(
-                        'mistral-large2', 
-                        '{{"prompt": "{prompt}"}}, temperature=0.5'
-                        ) as response;
-                    """ 
+                    ss.llm_model='mistral-large'
                     response_df=retrieve_data(sql)
-                    response_string=response_df.iloc[0,0]
-                    response_string=response_string.replace('"', '').replace('$', '\\$')
-                    # st.write(f"response_string={response_string}") #debug
-                    add_response(response_string)
-            
-            # st.write(f"""Just before msg print. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
-            for message in [msg for msg in ss.messages[3:] if msg['role']!='system']: # Display the prior chat messages
-                with st.chat_message(message["role"]):
-                    st.write(message["content"])
+            response_string=response_df.iloc[0,0]
+            response_string=response_string.replace('"', '').replace('$', '\\$')
+            # st.write(f"""sending this to add_assistant_mesage: {response_string}""") #debug
+            add_assistant_message(response_string)
+            st.rerun()
 
-            # st.write(f"""Just before prompt. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
-            if ss.messages[-1]["role"] != "user":
-                st.text_input('Enter question:', key='user_input', on_change=add_user_message)
-            
             # st.write(f"""at end ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
+            print('#### at end of main') #debug
 
 main()
