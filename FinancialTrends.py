@@ -30,7 +30,7 @@ if 'messages' not in ss:
 # set page config and title
 st.set_page_config( page_title="Financial Trends", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Financial Trends for Publically Traded Stocks</h2>', unsafe_allow_html=True)
-st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by Cybersyn')
+st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by Cybersyn. Summary and chat powered by mistral-large2 AI model')
 
 @st.cache_data(ttl="24h")
 def retrieve_data(sql):
@@ -175,7 +175,7 @@ order by period_end_date desc
             # ss.df=df
             # df = conn.query(sql)
             if len(ss.df)==0:
-                st.write(f"No Data Retrieved for stock ticker '{ticker_cleaned}'")
+                st.write(f"No Data Retrieved for company '{ss.company_and_ticker}'")
     
     # if not df.empty:
     # st.write(f"did it meet condition for chart? len(ss.df)={len(ss.df)}") # debug
@@ -195,7 +195,8 @@ order by period_end_date desc
                 Please verify the summary against the data and note any discrepancies: {data_json}"""}]
             ss.messages.append({"role":"system","content":"""Limit the responses to only questions that are relevant to this company's performance
                                 If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
-                                but rather answer with any data you do know about the industry performance or specific competitors and their performance """})
+                                but rather answer with any data you do know about the industry performance or specific competitors and their performance
+                                """})
         
             # prompt = ss.messages[-1]["content"]
             # st.write(prompt)
@@ -241,6 +242,11 @@ order by period_end_date desc
             if len(ss.messages)==3:
                 ss.messages.append({"role": "assistant", "content": 
                     f"""Welcome to Cortex Chat, powered by the Mistral-Large2 LLM Model. Please let me know if you have any questions about these metrics for {ss.df['COMPANY_NAME'].iloc[0]}."""})
+                ss.messages.append({"role":"system","content":"""
+                                If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
+                                but rather answer with any data you do know about the industry performance or specific competitors and their performance
+                                """})
+
 
             # st.write(f"ss.messages[-1]={ss.messages[-1]}") # debug
             # st.write(f"""Just before querying LLM. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") # DEBUG
@@ -266,12 +272,12 @@ order by period_end_date desc
                     add_response(response_string)
             
             # st.write(f"""Just before msg print. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
-            for message in ss.messages[3:]: # Display the prior chat messages
+            for message in [msg for msg in ss.messages[3:] if msg['role']!='system']: # Display the prior chat messages
                 with st.chat_message(message["role"]):
                     st.write(message["content"])
 
             # st.write(f"""Just before prompt. counter = {ss.counter}, ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
-            if ss.messages[-1]["role"] == "assistant":
+            if ss.messages[-1]["role"] != "user":
                 st.text_input('Enter question:', key='user_input', on_change=add_user_message)
             
             # st.write(f"""at end ss.messages[-1]["role"]={ss.messages[-1]["role"]}""") #debug
