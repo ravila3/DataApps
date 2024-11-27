@@ -156,27 +156,29 @@ r.cik
   end as Metric_Name
 , r.measure_description
 , (TRUNC(TO_NUMERIC(r.value),0)) AS value
-, ROW_NUMBER() OVER (PARTITION BY r.cik, r.period_start_date, r.period_end_date, r.covered_qtrs, metric_name ORDER BY ri.filed_date, r.adsh DESC) AS rn
+, ROW_NUMBER() OVER (PARTITION BY r.cik, r.period_start_date, r.period_end_date, r.covered_qtrs, metric_name ORDER BY ri.filed_date, (TRUNC(TO_NUMERIC(r.value),0)) DESC) AS rn
+--, ROW_NUMBER() OVER (PARTITION BY r.cik, r.period_start_date, r.period_end_date, r.covered_qtrs, metric_name ORDER BY ri.filed_date, r.adsh DESC) AS rn
 FROM SEC_FILINGS.cybersyn.sec_cik_index AS i
 JOIN SEC_FILINGS.cybersyn.company_index as c on (c.cik=i.cik)
 JOIN SEC_FILINGS.cybersyn.sec_report_attributes AS r ON (r.cik = i.cik)
 JOIN SEC_FILINGS.cybersyn.sec_report_index as ri on (ri.adsh=r.adsh)
 WHERE 
   c.cik='{ss.cik}'
+--  c.primary_ticker='CMCSA'
 --  i.company_name like '%AT&T%' --'AMR CORP'
 --  AND i.sic_code_description = 'AIR TRANSPORTATION, SCHEDULED'
-  AND r.period_end_date >= '2010-01-01'
+  AND r.period_end_date >= '2020-01-01'
   -- AND r.period_end_date = '2023-07-31'
   AND (r.covered_qtrs = 1 or statement='Balance Sheet')
   AND TRY_CAST(r.value AS NUMBER) IS NOT NULL
   AND r.statement in ('Income Statement','Balance Sheet','Stockholder Equity')-- ,'Balance Sheet','Cash Flow'
   AND form_type='10-Q'
-  AND r.metadata is null -- businesssegments in ('Communications') -- and subsegments is null and productorservice is null --    ,'CorporateAndOther','LatinAmericaBusinessSegment'
+  AND (r.metadata is null or tag='CommonStockSharesIssued')-- businesssegments in ('Communications') -- and subsegments is null and productorservice is null --    ,'CorporateAndOther','LatinAmericaBusinessSegment'
   AND (r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','OperatingIncomeLoss'
         ,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest','InterestExpenseOperating','NetIncomeLoss','CostsAndExpenses','BenefitsLossesAndExpenses'
         ,'InterestExpense','InterestExpenseNonoperating','Revenues','InterestIncomeExpenseNet','NoninterestIncome','InterestAndDividendIncomeOperating'
         ,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments'
-        ,'CommonStockSharesOutstanding', 'AssetsCurrent', 'Assets', 'Liabilities', 'LiabilitiesCurrent', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest','CommonStockSharesIssued')
+        ,'CommonStockSharesOutstanding','CommonStockSharesIssued', 'AssetsCurrent', 'Assets', 'Liabilities', 'LiabilitiesCurrent', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest')
   --or r.tag like '%Revenue%' or r.tag like '%Income%' 
   )
 )
