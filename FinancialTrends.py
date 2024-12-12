@@ -3,17 +3,24 @@
 # 2) look at 8-K summarization?
 
 # Import python packages
+import sec_edgar.financial_statements
+import sec_edgar.utils
 import streamlit as st
 import pandas as pd
 import altair as alt
+import yfinance as yf
+import sec_edgar
+import yfinance as yf
 import snowflake.connector
 from icecream import ic
-# import snowflake as snowflake
+# import snowflake as 
 from streamlit import session_state as ss
 from altair.expr import *
 from snowflake.snowpark import Session
 from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col
+from datetime import datetime,timedelta
+from SEC_Edgar_Loader import sec_edgar_financial_load
 
 connection_parameters = st.secrets["snowflake"]
 session = Session.builder.configs(connection_parameters).create()
@@ -24,9 +31,11 @@ if 'cik' not in ss:
     ss.company_name=''
     ss.company_and_ticker=''
     ss.llm_model=''
-    ss.df=pd.DataFrame(columns=['Column1'])
-    ss.sp=pd.DataFrame(columns=['Column1'])
-    ss.mdf=pd.DataFrame(columns=['Column1'])
+    ss.df=pd.DataFrame()
+    ss.filings_df=pd.DataFrame()
+    ss.quarterly_financials=pd.DataFrame()
+    ss.annual_financials=pd.DataFrame()
+    # ss.sp=pd.DataFrame(columns=['Column1'])
     ss.analysis_result=''
     ss.messages=[]
     ss.counter=0
@@ -55,7 +64,15 @@ def add_user_message():
 def add_assistant_message(response):
     ss.messages.append({"role": "assistant", "content": response})
 
-def get_line_chart(tdf,date,metric_name,value_field,width,height):
+def get_line_chart(tdf,date,metric_name,value_field,precision,width,height):
+
+    # st.write(tdf) #debug
+   # Aggregate the DataFrame to allow sort by for chart legend
+    totals_by_metric_df = tdf.groupby(metric_name, as_index=False)[value_field].sum()
+    totals_by_metric_df.rename(columns={value_field: 'total_value'}, inplace=True)
+    tdf = tdf.merge(totals_by_metric_df, on=metric_name, how='left')
+    tdf['total_for_order'] = tdf['total_value']
+    tdf.drop(columns=['total_value'], inplace=True)
 
     hover = alt.selection_point(
         fields=[date, metric_name],
@@ -85,7 +102,7 @@ def get_line_chart(tdf,date,metric_name,value_field,width,height):
         tooltip=[
             alt.Tooltip(date, type='temporal', format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
             metric_name,
-            alt.Tooltip(value_field, type='quantitative', format='$,d', title=value_field)
+            alt.Tooltip(value_field, type='quantitative', format=f'$,.{precision}f', title=value_field)
         ]
     ).add_params(hover)  #.interactive()
     
@@ -110,7 +127,7 @@ def main():
         ss.cik = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'CIK'].values[0]
         ss.ticker = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'PRIMARY_TICKER'].values[0]
         ss.company_name = company_lookup_df.loc[company_lookup_df['COMPANY_AND_TICKER'] == ss.company_and_ticker, 'COMPANY_NAME'].values[0]
-        ss.df=ss.sp=ss.mdf=pd.DataFrame(columns=['Column1']) # Clear out the dataframe
+        ss.filings_df=ss.annual_financials=ss.quarterly_financials=ss.df=ss.sp=ss.companyfacts_metrics_yahoo_dict=pd.DataFrame() #columns=['Column1']) # Clear out the dataframe
         ss.analysis_result=''
         ss.messages=[] # Clear out messages
         ss.counter=0 # Reset counter
@@ -118,130 +135,178 @@ def main():
         # st.subheader('Dataframe Reset due to submit button') #debug
 
         with st.spinner('Pulling 10-Q Financial Data...'):
-            sql = f"""
-with cf as
-(
-SELECT distinct
--- , r.variable
---r.metadata, r.metadata:BusinessSegments::string as BusinessSegments, r.metadata:Subsegments::string as Subsegments, r.metadata:ConsolidationItems::string as ConsolidationItems, r.metadata:ProductOrService::string as ProductOrService
-r.cik
-, r.adsh
-, ri.form_type
-, ri.filed_date
-, c.primary_ticker
-, initcap(i.company_name) as company_name
-, r.period_start_date
-, r.period_end_date
-, r.covered_qtrs
-, r.statement
-, r.tag
-, case
-    when statement = 'Income Statement'  and r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','Revenues','InvestmentIncomeInterestAndDividend','InterestAndDividendIncomeOperating') then 'Sales/Revenue'
-    when statement = 'Income Statement'  and r.tag in ('OperatingIncomeLoss','IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments') then 'Operating Income' --,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest'
-    when statement = 'Income Statement'  and r.tag in ('NetIncomeLoss','NetIncomeLossAvailableToCommonStockholdersBasic') then 'Net Income'
-    when statement = 'Income Statement'  and r.tag='CostOfRevenue' then 'Cost of Sales'
-    when statement = 'Income Statement'  and r.tag in ('CostsAndExpenses','BenefitsLossesAndExpenses') then 'Operating Costs'
-    when statement = 'Income Statement'  and r.tag='InterestAndDividendIncomeOperating' then 'Interest and Dividend Income'
-    when statement = 'Income Statement'  and r.tag in ('InterestExpense','InterestExpenseOperating','InterestExpenseNonoperating') then 'Interest Expense'
-    when statement = 'Income Statement'  and r.tag='InterestIncomeExpenseNet' then 'Interest Net Income'
-    when statement = 'Income Statement'  and r.tag='NoninterestIncome' then 'Non-Interest Income'
-    when r.tag='StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest' then 'Stockholders Equity'
-    when r.tag='LiabilitiesCurrent' then 'Current Liabilities'
-    when r.tag='Liabilities' then 'Total Liabilities'
-    when r.tag='AssetsCurrent' then 'Current Assets'
-    when r.tag='Assets' then 'Total Assets'
-    when r.tag in ('CommonStockSharesIssued','CommonStockSharesOutstanding') then 'Common Shares Outstanding'
-    -- when r.tag='Revenues' then 'Revenues'
-    else 'Other'
-  end as Metric_Name
-, r.measure_description
-, (TRUNC(TO_NUMERIC(r.value),0)) AS value
-, ROW_NUMBER() OVER (PARTITION BY r.cik, r.period_start_date, r.period_end_date, r.covered_qtrs, metric_name ORDER BY ri.filed_date, (TRUNC(TO_NUMERIC(r.value),0)) DESC) AS rn
---, ROW_NUMBER() OVER (PARTITION BY r.cik, r.period_start_date, r.period_end_date, r.covered_qtrs, metric_name ORDER BY ri.filed_date, r.adsh DESC) AS rn
-FROM SEC_FILINGS.cybersyn.sec_cik_index AS i
-JOIN SEC_FILINGS.cybersyn.company_index as c on (c.cik=i.cik)
-JOIN SEC_FILINGS.cybersyn.sec_report_attributes AS r ON (r.cik = i.cik)
-JOIN SEC_FILINGS.cybersyn.sec_report_index as ri on (ri.adsh=r.adsh)
-WHERE 
-  c.cik='{ss.cik}'
---  c.primary_ticker='CMCSA'
---  i.company_name like '%AT&T%' --'AMR CORP'
---  AND i.sic_code_description = 'AIR TRANSPORTATION, SCHEDULED'
-  AND r.period_end_date >= '2020-01-01'
-  -- AND r.period_end_date = '2023-07-31'
-  AND (r.covered_qtrs = 1 or statement='Balance Sheet')
-  AND TRY_CAST(r.value AS NUMBER) IS NOT NULL
-  AND r.statement in ('Income Statement','Balance Sheet','Stockholder Equity')-- ,'Balance Sheet','Cash Flow'
-  AND form_type='10-Q'
-  AND (r.metadata is null or tag='CommonStockSharesIssued')-- businesssegments in ('Communications') -- and subsegments is null and productorservice is null --    ,'CorporateAndOther','LatinAmericaBusinessSegment'
-  AND (r.tag in ('RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractWithCustomerIncludingAssessedTax','OperatingIncomeLoss'
-        ,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest','InterestExpenseOperating','NetIncomeLoss','CostsAndExpenses','BenefitsLossesAndExpenses'
-        ,'InterestExpense','InterestExpenseNonoperating','Revenues','InterestIncomeExpenseNet','NoninterestIncome','InterestAndDividendIncomeOperating'
-        ,'IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments'
-        ,'CommonStockSharesOutstanding','CommonStockSharesIssued', 'AssetsCurrent', 'Assets', 'Liabilities', 'LiabilitiesCurrent', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest')
-  --or r.tag like '%Revenue%' or r.tag like '%Income%' 
-  )
-)
-  
-select form_type, cik, primary_ticker, company_name, period_end_date, statement, Metric_Name, max(cast(value as integer)) as value  --, tag, measure_description, rn, businesssegments, subsegments, productorservice, ConsolidationItems, metadata --, max(Value) as Value
-from cf
-where value<>0 and rn=1 and Metric_Name<>'Other' --and tag not in ('RevenueFromContractWithCustomerExcludingAssessedTax','CostOfRevenue')
---AND period_end_date >= '2024-01-01' -- LIMIT SCOPE FOR DEVELOPMENT EFFICIENCY
-group by 1,2,3,4,5,6,7
-order by period_end_date desc
---limit 100
-            """
-            ss.df = ic(retrieve_data(sql))
-            print(f"#### 10-Q data retrieved, row count = {len(ss.df)}")
-            sql = f"""select ticker, date, primary_exchange_code, value as closing_price from FINANCE__ECONOMICS.CYBERSYN.STOCK_PRICE_TIMESERIES where variable='post-market_close' and ticker='{ss.ticker}' order by date"""
-            ss.sp = ic(retrieve_data(sql))
-            print(f"#### stock price data retrieved, row count = {len(ss.sp)}, and last price from {ss.sp['DATE'].max()}")
-            # ss.df=df
-            # df = conn.query(sql)
-            if len(ss.df)==0:
+            ss.filings_df,ss.quarterly_financials,ss.annual_financials=sec_edgar_financial_load(ss.cik)
+            
+            ss.ticker=ss.filings_df['primary_ticker'].iloc[0]
+
+            today = datetime.today().date()
+            x_years_ago = today - timedelta(days=4*365)
+            start_date = x_years_ago.replace(month=1, day=1) #set start date to Jan 1 of the day 4 years ago
+            today = datetime.today().date() #datetime.today().strftime('%Y-%m-%d')
+            
+            # ss.filings_df=ss.filings_df[ss.filings_df['filed_date']>=start_date]
+            # ss.quarterly_financials['end_date'] = pd.to_datetime(ss.quarterly_financials['end_date']).dt.date
+            ss.quarterly_financials=ss.quarterly_financials[ss.quarterly_financials['end_date']>=start_date]
+
+            # st.write('filings_df',ss.filings_df,'annual_financials',ss.annual_financiFals,'quarterly_financials',ss.quarterly_financials)
+
+            ticker=yf.Ticker(ss.ticker)
+            historical_prices=ticker.history(period='1d',start='2017-01-01',end=today) # gets following fields: Date, High, Low, Close, Volume, Dividends, Stock Splits
+            ss.sp=historical_prices.reset_index()
+            ss.sp['Ticker']=ss.ticker
+            ss.sp=ss.sp.rename(columns={'Close':'Stock Price'})
+            # st.write('stock prices',ss.sp) #debug
+
+            stats=ticker.info
+            # st.write('yahoo stats',stats) #debug write out yahoo dict
+
+            CompanyInfoYahoo = [
+            ('symbol','text'),
+            ('shortName','text'),
+            ('longName','text'),
+            ('firstTradeDateEpochUtc','epoch'),
+            ('website','text'),
+            ('industry','text'),
+            ('industryKey','text'),
+            ('industryDisp','text'),
+            ('sector','text'),
+            ('longBusinessSummary','text'),
+            ('fullTimeEmployees','integer'),
+            ('irWebsite','text'),
+            ('previousClose','decimal' ),
+            ('beta','decimal' ),
+            ('trailingPE','decimal' ),
+            ('forwardPE','decimal' ),
+            ('volume','integer'),
+            ('averageDailyVolume10Day','integer'),
+            ('fiftyTwoWeekLow','decimal' ),
+            ('fiftyTwoWeekHigh','decimal' ),
+            ('priceToSalesTrailing12Months','decimal' ),
+            ('enterpriseValue','integer'),
+            ('profitMargins','decimal' ),
+            ('sharesOutstanding','integer'),
+            ('sharesShort','integer'),
+            ('sharesShortPriorMonth','integer'),
+            ('heldPercentInsiders','decimal' ),
+            ('heldPercentInstitutions','decimal' ),
+            ('shortRatio','decimal'),
+            ('bookValue','integer'),
+            ('priceToBook','decimal' ),
+            ('lastFiscalYearEnd','epoch'),
+            ('nextFiscalYearEnd','epoch'),
+            ('trailingEps','decimal' ),
+            ('forwardEps','decimal' ),
+            ('enterpriseToRevenue','decimal' ),
+            ('enterpriseToEbitda','decimal' ),
+            ('52WeekChange','decimal' ),
+            ('numberOfAnalystOpinions','integer'),
+            ('recommendationKey','text'),
+            ('totalCash','integer'),
+            ('totalCashPerShare','decimal' ),
+            ('ebitda','integer'),
+            ('totalDebt','integer'),
+            ('quickRatio','decimal' ),
+            ('currentRatio','decimal' ),
+            ('totalRevenue','integer'),
+            ('debtToEquity','decimal' ),
+            ('revenuePerShare','decimal' ),
+            ('returnOnAssets','decimal' ),
+            ('returnOnEquity','decimal' ),
+            ('revenueGrowth','decimal' ),
+            ('freeCashflow','integer'),
+            ('operatingCashflow','integer'),
+            ('grossMargins','decimal' ),
+            ('ebitdaMargins','decimal' ),
+            ('operatingMargins','decimal' ),
+            ('trailingPegRatio','decimal' )
+            ]
+
+            ss.companyfacts_metrics_yahoo_dict = {metric[0]: {'format': metric[1]} for metric in CompanyInfoYahoo}
+
+            if len(ss.quarterly_financials)==0:
                 st.write(f"No 10-Q Data Retrieved for '{ss.company_and_ticker}'")
             if len(ss.sp)==0:
                 st.write(f"No Stock Price Data Retrieved for '{ss.company_and_ticker}'")                
     
     # if not df.empty:
     # st.write(f"did it meet condition for chart? len(ss.df)={len(ss.df)}") # debug
-    if len(ss.df)!=0:
+    if len(ss.quarterly_financials)!=0:
         # st.write(f"about to write chart (ss.df)={ss.df}") # debug
-        ss.df['VALUE'] = ss.df['VALUE'].astype(int)
-        ss.df['PERIOD_END_DATE'] = pd.to_datetime(ss.df['PERIOD_END_DATE'])
         # st.write(ss.df) ################ debug purposes only
-        filtered_df=ss.df[ss.df['STATEMENT']=='Income Statement']
-        chart_income_statement=get_line_chart(filtered_df,'PERIOD_END_DATE','METRIC_NAME','VALUE',400,300)
+        # filtered_df=ss.df[ss.df['STATEMENT']=='Income Statement']
 
-        filtered_df = ss.df[(ss.df['STATEMENT'] != 'Income Statement') & (ss.df['METRIC_NAME'] != 'Common Shares Outstanding')]
-
-        chart_balance_sheet=get_line_chart(filtered_df,'PERIOD_END_DATE','METRIC_NAME','VALUE',400,300)
+        # Step 1: Filter columns by "Income Statement" category
+        # st.write('ss.companyfacts_metrics_dict',ss.companyfacts_metrics_dict) #debug
+        # income_statement_columns = [metric for metric,details in ss.companyfacts_metrics_dict.items() if details['category'] == 'Income Statement']
         
-        if len(ss.mdf)==0:
-            pivoted_df = ic(ss.df.pivot_table(index=['PERIOD_END_DATE', 'CIK', 'PRIMARY_TICKER', 'COMPANY_NAME'], columns='METRIC_NAME', values='VALUE').reset_index())
-            ss.mdf = ic(pivoted_df[pivoted_df['Sales/Revenue'].notna()])
-            # st.write(ss.mdf) #debug
+        
+        # income_statement_columns_for_chart=['end_date']+ss.income_statement_columns_for_chart  
+        # income_statement_columns_for_chart=['end_date']+income_statement_columns_for_chart
+        # income_statement_columns_for_chart.insert(0, 'end_date') # Include 'end_date' for melting
+        # ss.quarterly_financials['end_date'] = pd.to_datetime(ss.quarterly_financials['end_date']).dt.date
+        # st.write(f"ss.quarterly_financials:",ss.quarterly_financials.dtypes) #debug
+        # st.write(f"income_statement_columns_for_chart: {income_statement_columns_for_chart}") #debug
+        chart_df=ss.quarterly_financials[['end_date']+ss.income_statement_columns_for_chart].melt(id_vars=['end_date'], var_name='metric', value_name='value')
+        chart_df=chart_df[pd.notna(chart_df['value'])]
 
-            if len(ss.sp)==0: # if no stock prices retrieved, set merged dataframe to pivoted data
-                ss.mdf['ROA'] = ss.mdf['Net Income'] / ss.mdf['Total Assets']
-                ss.mdf['EPS'] = ss.mdf['Net Income'] / ss.mdf['Common Shares Outstanding']
-                ss.mdf['Market_Cap'] = None
-                ss.mdf['PS'] = None
-                ss.mdf['PE'] = None
-                ss.mdf[['Market Cap', 'ROA', 'PS', 'PE']] = ss.mdf[['Market_Cap', 'ROA', 'PS', 'PE']].apply(pd.to_numeric, errors='coerce')
+        # Apply labels from dict, if there's a conflict take the max value
+        # label_map = {metric: details['label'] for metric, details in ss.companyfacts_metrics_dict.items()}
+        # chart_df['label'] = chart_df['metric'].map(label_map)
+        # chart_df.drop(columns='metric',inplace=True)
+        # chart_df.rename(columns={'label': 'metric'}, inplace=True)
+        chart_df_max = chart_df.groupby(['end_date', 'metric']).agg({'value': 'max'}).reset_index()
+        chart_income_statement=get_line_chart(chart_df_max,'end_date','metric','value',0,400,300)
 
-            else: # if stock prices were retrieved, run the rest of the calculations
-                # .... and get summary of 8-K updates
-                    temp_sp = ss.sp.sort_values(by='DATE').set_index('DATE').asfreq('D', method='ffill').reset_index() #fill in missing dates since there are no stock prices on weekends
-                    ss.mdf = pd.merge(ss.mdf, temp_sp[['DATE', 'CLOSING_PRICE']], left_on='PERIOD_END_DATE', right_on='DATE', how='left').drop(columns=['DATE'])
-                    ss.mdf['ROA'] = ss.mdf['Net Income'] / ss.mdf['Total Assets']
-                    ss.mdf['EPS'] = ss.mdf['Net Income'] / ss.mdf['Common Shares Outstanding']
-                    ss.mdf['Market_Cap'] = ss.mdf['CLOSING_PRICE'] * ss.mdf['Common Shares Outstanding']
-                    ss.mdf['PS'] = ss.mdf['Market_Cap'] / ss.mdf['Sales/Revenue']
-                    ss.mdf['PE'] = ss.mdf['CLOSING_PRICE'] / ss.mdf['EPS']
-                    ss.mdf[['Market_Cap', 'ROA', 'PS', 'PE']] = ss.mdf[['Market_Cap', 'ROA', 'PS', 'PE']].apply(pd.to_numeric, errors='coerce')
+        # balance_sheet_columns=ss.balance_sheet_columns.insert(0, 'end_date')  # Include 'end_date' for melting
+        chart_df=ss.quarterly_financials[['end_date']+ss.balance_sheet_columns].melt(id_vars=['end_date'], var_name='metric', value_name='value')
+        chart_df=chart_df[pd.notna(chart_df['value'])]
+        chart_balance_sheet=get_line_chart(chart_df,'end_date','metric','value',0,400,300)
+        
+        # st.altair_chart(chart_income_statement, use_container_width=True) #temp
+        # st.altair_chart(chart_balance_sheet, use_container_width=True) #temp
 
-        # st.write(ss.mdf) #debug
+        try:
+            # If no stock prices retrieved, set merged dataframe to pivoted data
+            ss.quarterly_financials['Operating Margin'] = ss.quarterly_financials['Operating Income'] / ss.quarterly_financials['Revenue/Sales']
+            ss.quarterly_financials['Net Margin'] = ss.quarterly_financials['Net Income'] / ss.quarterly_financials['Revenue/Sales']
+            ss.quarterly_financials['ROA'] = ss.quarterly_financials['Net Income'] / ss.quarterly_financials['Total Assets']
+            ss.quarterly_financials['EPS'] = ss.quarterly_financials['Net Income'] / ss.quarterly_financials['Common Shares Outstanding']
+            ss.quarterly_financials['EBITDA'] = (
+                    ss.quarterly_financials['Net Income'] + ss.quarterly_financials['Interest Expense'] + 
+                    ss.quarterly_financials['Income Tax'] + 
+                    ss.quarterly_financials['Depreciation'] + ss.quarterly_financials['Amortization'])
+            
+            if len(ss.sp) == 0:
+                ss.quarterly_financials['Market_Cap'] = None
+                ss.quarterly_financials['PS'] = None
+                ss.quarterly_financials['PE'] = None
+                ss.quarterly_financials[['Market_Cap', 'ROA', 'PS', 'PE']] = ss.quarterly_financials[['Market_Cap', 'ROA', 'PS', 'PE']].apply(pd.to_numeric, errors='coerce')
+
+            else:
+                if 'Stock Price' not in ss.quarterly_financials.columns:
+                    temp_sp = ss.sp.sort_values(by='Date').set_index('Date').asfreq('D', method='ffill').reset_index()
+                    ss.quarterly_financials['end_date'] = pd.to_datetime(ss.quarterly_financials['end_date']).dt.date #.dt.tz_localize(None)
+                    temp_sp['Date'] = pd.to_datetime(temp_sp['Date']).dt.date #.tz_localize(None)
+
+                    ss.quarterly_financials = pd.merge(
+                        ss.quarterly_financials, 
+                        temp_sp[['Date', 'Stock Price']], 
+                        left_on='end_date', 
+                        right_on='Date', 
+                        how='left'
+                    ).drop(columns=['Date'])
+                
+                # ss.quarterly_financials=ss.quarterly_financials.rename(columns={'Close':'Stock Price'})
+
+                ss.quarterly_financials['Market_Cap'] = (ss.quarterly_financials['Stock Price'] * ss.quarterly_financials['Common Shares Outstanding']).astype(int)
+                ss.quarterly_financials['PS'] = ss.quarterly_financials['Market_Cap'] / ss.quarterly_financials['Revenue/Sales']
+                ss.quarterly_financials['PE'] = ss.quarterly_financials['Stock Price'] / ss.quarterly_financials['EPS Basic']
+                ss.quarterly_financials[['Market_Cap', 'ROA', 'PS', 'PE']] = ss.quarterly_financials[['Market_Cap', 'ROA', 'PS', 'PE']].apply(pd.to_numeric, errors='coerce')
+
+        except ValueError as e:
+            print(f"Failed to calculate metrics: {e}")
+
+        # st.write('ss.quarterly_financials with ratios added',ss.quarterly_financials) #debug
         st.write(f":blue[Chart of Key Financials for {ss.company_name}, stock ticker '{ss.ticker}']")
 
         # Add CSS for min-width columns
@@ -272,21 +337,34 @@ order by period_end_date desc
         if len(ss.sp)!=0:
             with col3:
                 # st.write(ss.sp) #debug
-                chart_stock_price=get_line_chart(ss.sp,'DATE','TICKER','CLOSING_PRICE',400,300)
+                chart_stock_price=get_line_chart(ss.sp,'Date','Ticker','Stock Price',2,400,300)
                 title=f'Stock Price for {ss.ticker}'
                 st.markdown(f'<p class="centered-title">{title}</p>', unsafe_allow_html=True)
                 st.altair_chart(chart_stock_price, use_container_width=True)
-        
+
         # Prep for pulling LLM Summaries
         if ss.messages==[]: # Initialize the chat message history if no chat yet
-            ss.df['PERIOD_END_DATE'] = pd.to_datetime(ss.df['PERIOD_END_DATE']).dt.strftime('%Y-%m-%d')
-            temp_df = ss.df[ss.df['STATEMENT'] == 'Income Statement']
-            data_json = temp_df[['PERIOD_END_DATE','METRIC_NAME','VALUE']].to_json(orient='records')
-            ss.messages=[{"role":"user","content":f"""Put together a few bullets to summarize the trends of financial performance for {ss.df['COMPANY_NAME'].iloc[0].replace("'","")},
-                with each bullet including average annual growth rates and any major changes in trend. Use the following data from SEC 10-Q reports,
-                where the period_end_date is time, and the metric_name tells us what financial metric the value represents.
-                Also include trends related to operating margin and net margin, and ensure calculations are correct, and trend analysis is accurate.
-                Please verify the summary against the data and note any discrepancies: {data_json}"""}]
+            income_metrics_df=ss.quarterly_financials[['end_date']+ss.income_statement_columns_for_chart]
+            data_json = ss.quarterly_financials[['end_date']+ss.income_statement_columns].dropna().to_json(orient='records')
+
+            # Function to filter out null values
+            def filter_nulls_and_format_date(row):
+                # row = {k: v for k, v in row.items() if pd.notna(v)}
+                row = {k: (int(v) if isinstance(v, (int, float)) else v) for k, v in row.items() if pd.notna(v)}
+                row['end_date'] = row['end_date'].strftime('%b %Y')
+                return row
+
+            # Convert each row to a dictionary excluding null values
+            data_json = income_metrics_df.apply(lambda x: filter_nulls_and_format_date(x), axis=1).to_json(orient='records')
+            # st.write('data_json',data_json)
+            
+            # st.write('data_json',data_json)
+            ss.messages=[{"role":"user","content":f"""Put together 2-3 bullets on each income statement metric summarizing the trends of financial performance for {ss.company_name.replace("'","")}.
+                Include average annual growth rates and any years with major changes in growth rates year over year, and also note an observation on trend changes for the last few quarters, and the last quarterly result.
+                When comparing quarterly performance year over year, please compare against the same quarter in the previous years due to seasonality, and include the percent change if it is helpful.
+                Use the following data from SEC 10-Q reports, where the end_date is the end of quarter (MM-YYYY), and the metric names reference the income statement line items.
+                Also include operating margin and net margin as key metrics and always state the specific margins, and ensure calculations are correct, and trend analysis is accurate.
+                When stating specific values, please note them in millions of $ where appropriate. Please verify the summary against the data and note any discrepancies: {data_json}"""}]
             ss.messages.append({"role":"system","content":"""Limit the responses to only questions that are relevant to this company's performance
                                 If the user asks about performance relative to other competitors, do not respond with generic comparison frameworks, 
                                 but rather answer with any data you do know about the industry performance or specific competitors and their performance
@@ -302,10 +380,12 @@ order by period_end_date desc
         # st.write(prompt) #debug
         sql = f"""
         select snowflake.cortex.complete('{ss.llm_model}', 
-            '{prompt}, temperature=0.5'
+            '{prompt}, temperature=0.4'
             ) as response;
         """ 
         # st.write(sql) #debug
+        # ss.messages.append({"role":"assistant","content":"message to test without LLM"}) #debug
+
         if len(ss.messages)==2 and len(ss.analysis_result)==0:
             with st.spinner('Running LLM Analysis to provide a summary...'):
                 response_df = ic(retrieve_data(sql))
@@ -320,8 +400,47 @@ order by period_end_date desc
             st.markdown(ss.messages[2]["content"])
 
             # And write out the dataframe
-            st.markdown('<h3 style="color:#3894f0;">SEC 10-Q data collected from Cybersyn:</h3>', unsafe_allow_html=True)            
-            st.dataframe(ss.mdf.sort_values(by="PERIOD_END_DATE",ascending=False))
+            st.markdown('<h3 style="color:#3894f0;">SEC 10-Q data collected from SEC Edgar:</h3>', unsafe_allow_html=True)
+            filtered_df=ss.quarterly_financials.set_index('end_date').dropna(axis=1, how='all')
+
+            # Format the dataframe
+            formatted_df = filtered_df.style.format({
+                'Revenue/Sales': '${:,.0f}',
+                'Cost of Sales': '${:,.0f}',
+                'Gross Profit': '${:,.0f}',
+                'Total Expenses': '${:,.0f}',
+                'Operating Expenses': '${:,.0f}',
+                'SG&A Exp': '${:,.0f}',
+                'R&D Exp': '${:,.0f}',
+                'Operating Income': '${:,.0f}',
+                'Pretax Income': '${:,.0f}',
+                'Net Income': '${:,.0f}',
+                'Interest Expense': '${:,.0f}',
+                'EPS Basic': '{:.2f}',
+                'EPS Diluted': '{:.2f}',
+                'Total Assets': '${:,.0f}',
+                'Curr Assets': '${:,.0f}',
+                'Deposits': '${:,.0f}',
+                'Liabilities': '${:,.0f}',
+                'Curr Liabilities': '${:,.0f}',
+                'Long Term Debt': '${:,.0f}',
+                'Stockholder Equity': '${:,.0f}',
+                'Common Shares Outstanding': '{:,.0f}',
+                'Income Tax': '${:,.0f}',
+                'Depreciation': '${:,.0f}',
+                'Amortization': '${:,.0f}',
+                'Operating Margin': '{:.2%}',
+                'Net Margin': '{:.2%}',
+                'ROA': '{:.2%}',
+                'EPS': '{:.2f}',
+                'EBITDA': '${:,.2f}',
+                'Stock Price': '${:,.2f}',
+                'Market_Cap': '${:,.0f}',
+                'PS': '{:.2f}',
+                'PE': '{:.2f}'
+            })
+
+            st.dataframe(formatted_df) #.sort_values(by="end_date",ascending=False
             # st.write(analysis_result_text) ######## debug purposes only
 
         #if the summary is complete, prep for the chat interactions
