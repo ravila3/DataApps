@@ -1,3 +1,7 @@
 icecream
 snowflake-connector-python
 snowflake-snowpark-python
+sec_edgar.financial_statements
+sec_edgar.utils
+SEC_Edgar_Loader
+yfinance
