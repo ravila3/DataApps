@@ -1,0 +1,5 @@
+secrets.toml
+*.pem
+*.pub
+semantic-model-generator/
+sfguide-getting-started-with-cortex-analyst/

@@ -1,0 +1,5 @@
+icecream
+snowflake-connector-python
+snowflake-snowpark-python
+sec_edgar
+yfinance
