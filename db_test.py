@@ -3,13 +3,17 @@ import psycopg2
 
 st.title("PostgreSQL Connection Test")
 
+pg = st.secrets["postgres"]
+
 try:
     conn = psycopg2.connect(
-        host="localhost",
-        database="financial_data",
-        user="financial_app",
-        password="Rafman11"
+        host=pg["host"],
+        port=pg["port"],
+        dbname=pg["database"],
+        user=pg["user"],
+        password=pg["password"]
     )
+
     st.success("Connected successfully to PostgreSQL!")
 
     cur = conn.cursor()
