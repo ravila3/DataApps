@@ -3,3 +3,7 @@ secrets.toml
 *.pub
 semantic-model-generator/
 sfguide-getting-started-with-cortex-analyst/
+venv/
+__pycache__/
+*.pyc
+.env
