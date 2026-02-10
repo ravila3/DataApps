@@ -1,0 +1,21 @@
+-r requirements.txt
+
+git-filter-repo==2.47.0
+gitdb==4.0.12
+GitPython==3.1.44
+Pygments==2.19.1
+watchdog==6.0.0
+sv-ttk==2.6.0
+colorama==0.4.6
+platformdirs==4.3.6
+filelock==3.17.0
+cffi==1.17.1
+cryptography==44.0.2
+pyOpenSSL==25.0.0
+curl_cffi==0.10.0
+peewee==3.17.9
+pytest==7.4.0
+black
+flake8
+ipykernel
+jupyter
