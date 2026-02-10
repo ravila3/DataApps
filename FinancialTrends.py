@@ -97,7 +97,11 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
         nearest=True,
         on="mouseover",
         empty=False) #"none")
-    legend_selection = alt.selection_point(fields=[metric_name], bind='legend')
+    
+    legend_selection = alt.selection_point(
+        fields=[metric_name],
+        bind='legend'
+    )
     
     color_encoding = alt.Color(metric_name, legend=alt.Legend(title=metric_name, labelLimit=400), sort=alt.EncodingSortField('total_for_order', order='descending'))
     
@@ -112,21 +116,195 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
         ).add_params(legend_selection)
     ).properties(width=width, height=height)
     
-    points = alt.Chart(tdf).mark_point().encode(
-        x=alt.X(date, type='temporal'),
-        y=alt.Y(value_field, type='quantitative'), #metric_name,
-        color=color_encoding,
-        opacity=alt.condition(hover, alt.value(1), alt.value(0)),
-        tooltip=(
-            [
-                alt.Tooltip(date, type='temporal', format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
-                metric_name,
-                alt.Tooltip(value_field, type='quantitative', format=f'$,.{precision}f', title=value_field)
-            ] + ([alt.Tooltip(growth_field, type='quantitative', format='.2%', title='12m growth')] if growth_field is not None else [])
-        )
-    ).add_params(hover)  #.interactive()
+    # points = alt.Chart(tdf).mark_point().encode(
+    #     x=alt.X(date, type='temporal'),
+    #     y=alt.Y(value_field, type='quantitative'), #metric_name,
+    #     color=color_encoding,
+    #     opacity=alt.condition(hover, alt.value(1), alt.value(0)),
+    #     tooltip=(
+    #         [
+    #             alt.Tooltip(date, type='temporal', format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
+    #             metric_name,
+    #             alt.Tooltip(value_field, type='quantitative', format=f'$,.{precision}f', title=value_field)
+    #         ] + ([alt.Tooltip(growth_field, type='quantitative', format='.2%', title='12m growth')] if growth_field is not None else [])
+    #     )
+    # ).add_params(hover)  #.interactive()
     
+    points = (
+        alt.Chart(tdf)
+        .mark_point()
+        .encode(
+            x=alt.X(date, type='temporal'),
+            y=alt.Y(value_field, type='quantitative'),
+            color=color_encoding,
+            opacity=alt.condition(
+                hover & legend_selection,
+                alt.value(1),
+                alt.value(0)
+            ),
+            tooltip=(
+                [
+                    alt.Tooltip(date, type='temporal', format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
+                    metric_name,
+                    alt.Tooltip(value_field, type='quantitative', format=f'$,.{precision}f', title=value_field)
+                ]
+                + (
+                    [alt.Tooltip(growth_field, type='quantitative', format='.2%', title='12m growth')]
+                    if growth_field is not None else []
+                )
+            )
+        )
+        .add_params(hover)
+        .transform_filter(legend_selection)
+)
+        
     return (lines + points) #  + tooltips
+
+#format values for Yahoo Metrics based on declared format
+def _format_value(fmt, value):
+    """Format a raw value according to the declared fmt for display in the UI."""
+    if value is None:
+        return ""
+    try:
+        if fmt == 'epoch':
+            v = int(value)
+            if v > 1e12:  # milliseconds
+                return datetime.utcfromtimestamp(v / 1000).strftime('%Y-%m-%d')
+            else:
+                return datetime.utcfromtimestamp(v).strftime('%Y-%m-%d')
+        if fmt == 'integer':
+            return f"{int(float(value)):,}"
+        if fmt == 'decimal':
+            return f"{float(value):,.2f}"
+        if fmt == 'percent':
+            try:
+                v = float(value)
+                # If value is provided as a fraction (-1..1), convert to percent
+                if -1 <= v <= 1:
+                    v = v * 100
+                return f"{v:,.2f}%"
+            except Exception:
+                return str(value)
+        # text or default
+        s = str(value)
+        # truncate very long text for table display
+        return s if len(s) <= 400 else s[:400] + '...'
+    except Exception:
+        return str(value)
+
+# evaluate thresholds and direction on Yahoo Metrics to determine if value should be colored red/green; used for Yahoo Metrics display
+def _evaluate_color(fmt, raw_value, thresholds):
+    """Decide a text color (red/green) based on thresholds and direction.
+    Returns a CSS color string (hex) for the value text, or empty string for no color.
+    """
+    if not thresholds or raw_value is None:
+        return ""
+    try:
+        v = raw_value
+        # normalize percent fields to percent numbers (e.g., 0.12 -> 12.0)
+        if fmt == 'percent':
+            v = float(v)
+            if -1 <= v <= 1:
+                v = v * 100.0
+        else:
+            v = float(v)
+
+        low = thresholds.get('low')
+        high = thresholds.get('high')
+        direction = thresholds.get('direction', 'higher_is_good')
+
+        # text color constants (darker colors for readability)
+        red_text = '#8b0000'    # dark red
+        green_text = '#006400'  # dark green
+
+        if direction == 'higher_is_bad':
+            if high is not None and v >= high:
+                return red_text
+            if low is not None and v <= low:
+                return green_text
+            return ""
+        else:  # higher_is_good
+            if high is not None and v >= high:
+                return green_text
+            if low is not None and v <= low:
+                return red_text
+            return ""
+    except Exception:
+        return ""
+
+def show_yahoo_metrics(rows):
+    if not rows:
+        st.write("No Yahoo metrics to display.")
+        # return
+
+    # # Build a DataFrame for display
+    # yahoo_df = pd.DataFrame(rows)
+    # yahoo_df['color'] = yahoo_df.apply(lambda r: _evaluate_color(r['format'], r['value'], r.get('thresholds', {})), axis=1)
+
+    # # Display in Streamlit with conditional coloring
+    # for idx, row in yahoo_df.iterrows():
+    #     field = row['field']
+    #     display_value = row['display']
+    #     color = row['color']
+    #     st.markdown(f"<span style='color:{color}'><strong>{field}:</strong> {display_value}</span>", unsafe_allow_html=True)
+
+    try:
+        df_rows = pd.DataFrame(rows)
+        
+        # Layout the Yahoo fields in three visual columns. Each column lists
+        # multiple entries with the field name (bold) and the formatted display value below it.
+        entries = list(df_rows[['field', 'display']].itertuples(index=False, name=None))
+        if len(entries) == 0:
+            st.write("No Yahoo fields available")
+        else:
+            # Put the controls and display inside an expander so users can collapse it.
+            with st.expander("Yahoo Key Metrics data (max 4-column layout)", expanded=True):
+                # Fixed 4-column layout with roughly equal rows per column
+                num_cols = 4
+                # show_format = st.checkbox("Show format inline (e.g. percent/decimal)", value=False)
+
+                # split entries into num_cols roughly equal chunks
+                n = len(entries)
+                per_col = (n + num_cols - 1) // num_cols  # ceiling division
+                cols = st.columns(num_cols)
+                for i, col in enumerate(cols):
+                    start = i * per_col
+                    end = start + per_col
+                    with col:
+                        for field, display in entries[start:end]:
+                            try:
+                                fmt = df_rows.loc[df_rows['field'] == field, 'format'].iloc[0]
+                                thresholds = df_rows.loc[df_rows['field'] == field, 'thresholds'].iloc[0]
+                            except Exception:
+                                fmt = ''
+                                thresholds = {}
+
+                            color = _evaluate_color(fmt, df_rows.loc[df_rows['field'] == field, 'raw_value'].iloc[0], thresholds)
+                            # render single-line; apply background color inline if present
+                            label = f"{field}: {display}"
+
+                            if color:
+                                html = f"<div style=\"background-color: {color}; padding:6px; border-radius:4px\">{label}</div>"
+                                st.markdown(html, unsafe_allow_html=True)
+                            else:
+                                st.markdown(label)
+    except Exception:
+                            if color:
+                                # color only the value text; keep the field label bold and uncolored
+                                # label contains the bold field and optional format; we need to insert span around the display part
+                                # build safe HTML: bold field + optional format, then colored span for the value
+                                try:
+                                    prefix, sep, val = label.partition(': ')
+                                    if sep:
+                                        html = f"{prefix}: <span style=\"color:{color}\">{val}</span>"
+                                    else:
+                                        html = f"<span style=\"color:{color}\">{label}</span>"
+                                except Exception:
+                                    html = f"<span style=\"color:{color}\">{label}</span>"
+                                st.markdown(html, unsafe_allow_html=True)
+                            else:
+                                st.markdown(label)
+    return
 
 def main():
     print('#### Starting at top of main') #debug
@@ -258,75 +436,6 @@ def main():
             # Build a dict with both the expected format and the actual value pulled from yfinance
             ss.companyfacts_metrics_yahoo_dict = {}
             rows = []
-            def _format_value(fmt, value):
-                """Format a raw value according to the declared fmt for display in the UI."""
-                if value is None:
-                    return ""
-                try:
-                    if fmt == 'epoch':
-                        v = int(value)
-                        if v > 1e12:  # milliseconds
-                            return datetime.utcfromtimestamp(v / 1000).strftime('%Y-%m-%d')
-                        else:
-                            return datetime.utcfromtimestamp(v).strftime('%Y-%m-%d')
-                    if fmt == 'integer':
-                        return f"{int(float(value)):,}"
-                    if fmt == 'decimal':
-                        return f"{float(value):,.2f}"
-                    if fmt == 'percent':
-                        try:
-                            v = float(value)
-                            # If value is provided as a fraction (-1..1), convert to percent
-                            if -1 <= v <= 1:
-                                v = v * 100
-                            return f"{v:,.2f}%"
-                        except Exception:
-                            return str(value)
-                    # text or default
-                    s = str(value)
-                    # truncate very long text for table display
-                    return s if len(s) <= 400 else s[:400] + '...'
-                except Exception:
-                    return str(value)
-
-            def _evaluate_color(fmt, raw_value, thresholds):
-                """Decide a text color (red/green) based on thresholds and direction.
-                Returns a CSS color string (hex) for the value text, or empty string for no color.
-                """
-                if not thresholds or raw_value is None:
-                    return ""
-                try:
-                    v = raw_value
-                    # normalize percent fields to percent numbers (e.g., 0.12 -> 12.0)
-                    if fmt == 'percent':
-                        v = float(v)
-                        if -1 <= v <= 1:
-                            v = v * 100.0
-                    else:
-                        v = float(v)
-
-                    low = thresholds.get('low')
-                    high = thresholds.get('high')
-                    direction = thresholds.get('direction', 'higher_is_good')
-
-                    # text color constants (darker colors for readability)
-                    red_text = '#8b0000'    # dark red
-                    green_text = '#006400'  # dark green
-
-                    if direction == 'higher_is_bad':
-                        if high is not None and v >= high:
-                            return red_text
-                        if low is not None and v <= low:
-                            return green_text
-                        return ""
-                    else:  # higher_is_good
-                        if high is not None and v >= high:
-                            return green_text
-                        if low is not None and v <= low:
-                            return red_text
-                        return ""
-                except Exception:
-                    return ""
 
             for item in CompanyInfoYahoo:
                 # allow entries to be (name, fmt) or (name, fmt, thresholds)
@@ -345,64 +454,7 @@ def main():
 
                 ss.companyfacts_metrics_yahoo_dict[name] = {'format': fmt, 'value': raw_value, 'display': display_value, 'thresholds': thresholds}
                 rows.append({'field': name, 'format': fmt, 'display': display_value, 'raw_value': raw_value, 'thresholds': thresholds})
-
-            # Show a compact, readable table in Streamlit using the formatted display column
-            try:
-                df_rows = pd.DataFrame(rows)
-
-                # Layout the Yahoo fields in three visual columns. Each column lists
-                # multiple entries with the field name (bold) and the formatted display value below it.
-                entries = list(df_rows[['field', 'display']].itertuples(index=False, name=None))
-                if len(entries) == 0:
-                    st.write("No Yahoo fields available")
-                else:
-                    # Put the controls and display inside an expander so users can collapse it.
-                    with st.expander("Yahoo data (4-column layout)", expanded=True):
-                        # Fixed 4-column layout with roughly equal rows per column
-                        num_cols = 4
-                        # show_format = st.checkbox("Show format inline (e.g. percent/decimal)", value=False)
-
-                        # split entries into num_cols roughly equal chunks
-                        n = len(entries)
-                        per_col = (n + num_cols - 1) // num_cols  # ceiling division
-                        cols = st.columns(num_cols)
-                        for i, col in enumerate(cols):
-                            start = i * per_col
-                            end = start + per_col
-                            with col:
-                                for field, display in entries[start:end]:
-                                    try:
-                                        fmt = df_rows.loc[df_rows['field'] == field, 'format'].iloc[0]
-                                        thresholds = df_rows.loc[df_rows['field'] == field, 'thresholds'].iloc[0]
-                                    except Exception:
-                                        fmt = ''
-                                        thresholds = {}
-
-                                    color = _evaluate_color(fmt, df_rows.loc[df_rows['field'] == field, 'raw_value'].iloc[0], thresholds)
-                                    # render single-line; apply background color inline if present
-                                    label = f"{field}: {display}"
-
-                                    if color:
-                                        html = f"<div style=\"background-color: {color}; padding:6px; border-radius:4px\">{label}</div>"
-                                        st.markdown(html, unsafe_allow_html=True)
-                                    else:
-                                        st.markdown(label)
-            except Exception:
-                                    if color:
-                                        # color only the value text; keep the field label bold and uncolored
-                                        # label contains the bold field and optional format; we need to insert span around the display part
-                                        # build safe HTML: bold field + optional format, then colored span for the value
-                                        try:
-                                            prefix, sep, val = label.partition(': ')
-                                            if sep:
-                                                html = f"{prefix}: <span style=\"color:{color}\">{val}</span>"
-                                            else:
-                                                html = f"<span style=\"color:{color}\">{label}</span>"
-                                        except Exception:
-                                            html = f"<span style=\"color:{color}\">{label}</span>"
-                                        st.markdown(html, unsafe_allow_html=True)
-                                    else:
-                                        st.markdown(label)
+            
         # Load SEC EDGAR financials for the selected CIK (guarded)
         try:
             res = sec_edgar_financial_load(ss.cik)
@@ -555,6 +607,9 @@ def main():
                 title=f'Stock Price for {ss.ticker}'
                 st.markdown(f'<p class="centered-title">{title}</p>', unsafe_allow_html=True)
                 st.altair_chart(chart_stock_price, width='stretch')
+
+        # Show a compact, readable table in Streamlit using the formatted display column
+        show_yahoo_metrics(rows)
             
         # Format the dataframe
         filtered_df=ss.quarterly_financials.set_index('end_date').dropna(axis=1, how='all')
