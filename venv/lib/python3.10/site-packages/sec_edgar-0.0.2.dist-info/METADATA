@@ -1,0 +1,33 @@
+Metadata-Version: 2.1
+Name: sec-edgar
+Version: 0.0.2
+Summary: A package for automatically downloading & updating data from the SEC Edgar database
+Home-page: https://github.com/davidsilva2841/sec_project
+Author: David Silva
+Author-email: david.silva2841+python@gmail.com
+License: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Office/Business :: Financial :: Investment
+Description-Content-Type: text/markdown
+
+# sec-edgar
+A Python package for automatically downloading & updating data from the SEC Edgar database
+
+#### Install
+    pip install sec-edgar
+
+#### Downloads all zip files and unzips them to package folder
+    from sec_edgar.financial_statements import financial_statements
+    financial_statements.download()
+
+#### Specify a directory
+    from sec_edgar.financial_statements import financial_statements
+    financial_statements.download(dest_path='/home/username/destination')
+
+- This will automatically keep track of downloaded files and only download new files 
+when run at a later date
+
+
