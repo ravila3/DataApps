@@ -1,3 +1,4 @@
+import psycopg2
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -261,4 +262,61 @@ def yahoo_finance_df_format():
     companyfacts_metrics_yahoo_dict = {metric[0]: {'format': metric[1]} for metric in CompanyInfoYahoo}
 
     return companyfacts_metrics_yahoo_dict
+
+def postgresql_write(df,table_name,create_table_query):
+    # connection_params = st.secrets["postgresql"]
+    # st.write(connection_params)
+
+    # # Load private key details from secrets
+    # private_key_passphrase = st.secrets["postgresql"]["private_key_passphrase"]
+    # private_key_path = st.secrets["postgresql"]["private_key_path"]
+
+    # # Load the private key
+    # with open(private_key_path, 'rb') as key_file:
+    #     p_key = serialization.load_pem_private_key(
+    #         key_file.read(),
+    #         password=private_key_passphrase.encode(),
+    #         backend=default_backend()
+    #     )
+    #     pkb = p_key.private_bytes(
+    #         encoding=serialization.Encoding.DER,
+    #         format=serialization.PrivateFormat.PKCS8,
+    #         encryption_algorithm=serialization.NoEncryption()
+    #     )
+
+    # Create a new dictionary that includes the private key
+    connection_params = {
+        "user": st.secrets["postgresql"]["user"],
+        "host": st.secrets["postgresql"]["host"],
+        "port": st.secrets["postgresql"]["port"],
+        "database": st.secrets["postgresql"]["database"],
+        # "private_key": pkb
+    }
+
+    # st.write(connection_params) #debug
+    # Connect to PostgreSQL
+    conn = psycopg2.connect(**connection_params)
+
+    # Write the DataFrame to PostgreSQL
+    cursor = conn.cursor()
+    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+    cursor.execute(create_table_query)
+    
+    st.write(create_table_query) #debug
+    df.columns = df.columns.str.lower()  # PostgreSQL typically uses lowercase for column names
+    df.replace('Infinity', np.nan, inplace=True)
+
+    for index, row in df.iterrows():
+        columns = ', '.join(row.index)
+        values = ', '.join(['%s'] * len(row))
+        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({values})"
+        cursor.execute(insert_query, tuple(row))
+
+    conn.commit()
+    
+    st.write(f"Successfully wrote {len(df)} rows to PostgreSQL.")
+        
+    # Close the connection
+    cursor.close()
+    conn.close()
 
