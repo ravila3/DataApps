@@ -30,24 +30,27 @@ if "quarterly_financials" not in ss:
     ss.selected_company=None
     ss.hide_menu=False
     
-def plot_regression_line(name,var_name,X, y, y_pred_plot, slope, r2):
+def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date):
 
     # Build DataFrame for Altair
     plot_df = pd.DataFrame({
         "Quarter Index": X,
+        "x_label": pd.to_datetime(end_date),
         var_name: y,
         "Fitted": y_pred_plot,
     })
+    
+    # st.write(plot_df) #debug
 
     # Chart
     chart = (
         alt.Chart(plot_df)
         .mark_line(point=True)
         .encode(
-            x=alt.X("Quarter Index:Q"),
+            x=alt.X("x_label:T", title="End Date"),
             y=alt.Y(f"{var_name}:Q", title=var_name.replace("_", " ")),
             tooltip=[
-                alt.Tooltip("Quarter Index:Q", title="Quarter"),
+                alt.Tooltip("x_label:T", title="End Date"),
                 alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
                 alt.Tooltip("Fitted:Q", title="Trend", format=",.0f")
             ]            
@@ -55,7 +58,7 @@ def plot_regression_line(name,var_name,X, y, y_pred_plot, slope, r2):
         .properties(
             width=800,
             height=400,
-            title=f"{var_name.replace('_', ' ')} Trend with Regression Line for {name}, Slope: {slope:,.2f}, R²: {r2:.4f}"
+            title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: ${slope/1000:,.1f}k, R²: {r2:.4f}"
         )
     )
 
@@ -64,47 +67,55 @@ def plot_regression_line(name,var_name,X, y, y_pred_plot, slope, r2):
         alt.Chart(plot_df)
         .mark_line(color="red")
         .encode(
-            x="Quarter Index:Q",
+            x="x_label:T",
             y="Fitted:Q"
         )
     )
 
-    st.altair_chart(chart + reg_line, width='content')              
+    # st.altair_chart(chart + reg_line, width='content')              
     return chart + reg_line
 
 def sanitize(values):
-    # Remove None, NaN, and non-numeric junk
-    clean = [
-        v for v in values
-        if v is not None and not (isinstance(v, float) and np.isnan(v))
-    ]
-    arr = np.array(clean, dtype=float)
+    # Convert everything to float, invalid values become np.nan
+    arr = pd.to_numeric(values, errors='coerce').astype(float)
 
-    # Bail early if empty or all NaN
-    if len(arr) == 0 or np.isnan(arr).all():
+    # If all values are NaN, return None
+    if np.isnan(arr).all():
         return None
 
     return arr
 
-def perform_regression(name,var_name, values, plot_regression_bin):
+def perform_regression(name, var_name, values, end_date, plot_regression_bin):
+    
     # 1. Sanitize input
     y = sanitize(values)
     if y is None:
         return None  # nothing to regress on
+    
+    # st.write(f"values: {len(values)}, y: {len(y)}")
+    end_date = np.array(end_date)
+    
+    # st.write(len(y),len(end_date)) #debug
+    
+    assert len(y) == len(end_date), f"Length mismatch: y={len(y)}, end_date={len(end_date)}"
 
-    # 2. Compute initial MAD-based mask
-    median = np.median(y)
-    mad = np.median(np.abs(y - median))
+    # y already length-preserving
+    median = np.median(y[~np.isnan(y)])  # ignore NaNs for median
+    mad = np.median(np.abs(y[~np.isnan(y)] - median))
+
 
     if mad == 0:
-        mask = np.ones_like(y, dtype=bool)
+        mask = ~np.isnan(y)
     else:
         z = 0.6745 * (y - median) / mad
-        mask = np.abs(z) < 20.0
+        mask = (np.abs(z) < 20.0) & ~np.isnan(y)
 
-    # 3. Apply mask
     y_clean = y[mask]
+    # st.write(y_clean) #debug
 
+    end_date_clean = np.array(end_date)[mask]
+    # same for fiscal_str if you use it
+    
     # 4. Bail early if mask wipes out too much
     if len(y_clean) < 2 or np.isnan(y_clean).any():
         return None
@@ -144,12 +155,14 @@ def perform_regression(name,var_name, values, plot_regression_bin):
         ss_tot = np.sum((y_clean - np.mean(y_clean)) ** 2)
         r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
         if plot_regression_bin==1:
-            plot_regression_line(name, var_name, X_clean, y_clean, y_pred_plot, slope, r2) #debug
+            chart=plot_regression_line(name, var_name, X_clean, y_clean, y_pred_plot, slope, r2, end_date_clean) #debug
+        else:
+            chart=None
 
         residuals = y_clean - y_pred
         last_n = min(3, len(residuals)) # if less than 3 points, take all
         avg_residual_last3 = residuals[-last_n:].mean()
-    return slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3
+    return slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart
 
 # ===== Growth Analysis Functions =====
 def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
@@ -187,6 +200,8 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     
     quarterly_df_wc['year_quarter'] = quarterly_df_wc['fiscal_timeframe'].apply(parse_fiscal_timeframe)
     quarterly_df_wc = quarterly_df_wc[quarterly_df_wc['year_quarter'].notna()]  # Remove rows with invalid fiscal_timeframe
+    
+    # st.write(quarterly_df_wc) #debug
     
     if len(quarterly_df_wc) < 8:
         return quarterly_df, None
@@ -243,6 +258,8 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     
     # Calculate and store margin values for all quarters
     if 'Net Income' in quarterly_df_wc.columns and 'Revenue/Sales' in quarterly_df_wc.columns:
+        fiscal_str = quarterly_df_wc['fiscal_timeframe'].tolist()
+        end_date = quarterly_df_wc['end_date'].tolist()
         income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
         revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
         
@@ -377,16 +394,17 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     # st.json(metrics) # debug
     if len(revenue_values) >= 6:
         try:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3 = perform_regression(name, "Revenue", revenue_values, plot_regression_bin)
+            # st.write(len(revenue_values),len(end_date)) #debug
+            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue = perform_regression(name, "Revenue", revenue_values, end_date, plot_regression_bin)
             metrics['revenue_r2'] = r2
             metrics['revenue_growth_slope'] = round(slope, 1)
             metrics['revenue_growth_median'] = median
             metrics['revenue_n'] = n
             metrics['revenue_n_outliers'] = n_outliers
             metrics['revenue_avg_residual_last3'] = avg_residual_last3
-        except:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3 = 0, 0, 0, 0, 0, 0, 0, 0
-            print(f"Regression failed for Revenue on company {name}")  # debug
+        except Exception as e:
+            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue = 0, 0, 0, 0, 0, 0, 0, 0, None
+            print(f"Regression failed for Revenue on company {name} due to {e}")  # debug
             
    
     if metrics['income_growth_list']:
@@ -405,18 +423,17 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         # Linear regression for income growth trend
     if len(income_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
         try:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3 = perform_regression(name, "Income", income_values, plot_regression_bin)
+            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income = perform_regression(name, "Income", income_values, end_date, plot_regression_bin)
             metrics['income_growth_slope'] = round(slope, 1)
             metrics['income_r2'] = r2
             metrics['income_growth_median'] = median
             metrics['income_n'] = n
             metrics['income_n_outliers'] = n_outliers
             metrics['income_avg_residual_last3'] = avg_residual_last3
-        except:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3 = 0, 0, 0, 0, 0, 0, 0, 0
-            print(f"Regression failed for Income for company {name}")  # debug
+        except Exception as e:
+            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income = 0, 0, 0, 0, 0, 0, 0, 0, None
+            print(f"Regression failed for Income for company {name} due to {e}")  # debug
         
-    
     if metrics['margin_growth_list']:
         margin_growths = metrics['margin_growth_list']
         metrics['median_margin_growth'] = np.median(margin_growths)
@@ -430,16 +447,16 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     # Linear regression for margin growth trend
     if len(margin_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
         try:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3 = perform_regression(name, "Margin", margin_values, plot_regression_bin)
+            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin = perform_regression(name, "Margin", margin_values, end_date, plot_regression_bin)
             metrics['margin_r2'] = r2
             metrics['margin_growth_slope'] = round(slope, 1)
             metrics['margin_avg_residual_last3'] = avg_residual_last3
             metrics['margin_growth_median'] = median
             metrics['margin_n'] = n
             metrics['margin_n_outliers'] = n_outliers
-        except:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3 = 0, 0, 0, 0, 0, 0, 0, 0
-            print(f"Regression failed for Margin for company {name}")  # debug
+        except Exception as e:
+            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin = 0, 0, 0, 0, 0, 0, 0, 0, None
+            print(f"Regression failed for Margin for company {name} due to {e}")  # debug
     
     # Calculate average margin and last 3 quarters average margin
     if metrics['margin_values']:
@@ -454,6 +471,21 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         
     # st.write(metrics)  # debug
     # st.write(result_df)  # debug
+    
+    if plot_regression_bin==1:
+        try:
+            col1, spacer1, col2, spacer2, col3 = st.columns([1, 0.1, 1, 0.1, 1])
+            if chart_revenue is not None:
+                with col1:
+                    st.altair_chart(chart_revenue, width='content')
+            if chart_income is not None:
+                with col2:
+                    st.altair_chart(chart_income, width='content')
+            if chart_margin is not None:
+                with col3:
+                    st.altair_chart(chart_margin, width='content')
+        except Exception as e:
+            st.write(f"Could not render regression charts due to {e}")
     
     return result_df, metrics
 
@@ -902,14 +934,23 @@ def display_analysis_summary(stock_growth_analysis_df):
         if 'chart' not in ss.editable_stock_growth_analysis_df.columns: 
             ss.editable_stock_growth_analysis_df.insert(0, "chart", False)
         
-        median_series = ss.editable_stock_growth_analysis_df['Revenue_Growth_Median']
-        min_val = float(median_series.min())
-        max_val = float(median_series.max())
-        default_range = (min_val, max_val)
-        low, high = st.slider(label="Median Revenue",min_value=min_val,max_value=max_val,value=default_range,format='dollar')
+        # median_series = ss.editable_stock_growth_analysis_df['Revenue_Growth_Median']
+        # min_val = float(median_series.min())
+        # max_val = float(median_series.max())
+        # default_range = (min_val, max_val)
+        # low, high = st.slider(label="Median Revenue",min_value=min_val,max_value=max_val,value=default_range,format='dollar')
+        # filtered_df = ss.editable_stock_growth_analysis_df[
+        #     (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] >= low) &
+        #     (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] <= high)
+        # ]
         filtered_df = ss.editable_stock_growth_analysis_df[
-            (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] >= low) &
-            (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] <= high)
+            (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] <100000000000000000000000)
+            # & (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= .60)
+            # & (ss.editable_stock_growth_analysis_df['Revenue_Growth_N'] >= 25)
+            # & (ss.editable_stock_growth_analysis_df['Revenue_Growth_PCT'] >= 5)
+            # & (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= 5)
+            # # & (ss.editable_stock_growth_analysis_df['trailing_ps'] <= 8)
+            # & (ss.editable_stock_growth_analysis_df['category']=="")
         ]
             
         styled = build_styler(filtered_df)
@@ -924,12 +965,12 @@ def display_analysis_summary(stock_growth_analysis_df):
                         # Reset checkbox        
                         ss.editable_stock_growth_analysis_df.at[row_index, "chart"] = False
                         changes["chart"] = False
-                    if changes.get('category') is True or changes.get('notes') is True:
-                        st.toast('Saving your change')
-                        postgres_update(ss.editable_stock_growth_analysis_df[['cik','category','notes']], 'editable_stock_data', ['cik'])
+                    # if changes.get('category') is True or changes.get('notes') is True:
+                    #     st.toast('Saving your change')
+                    #     postgres_update(ss.editable_stock_growth_analysis_df[['cik','category','notes']], 'editable_stock_data', ['cik'])
                 # st.session_state["my_editor"] = editor_state
 
-        ss.categories_list = ['Strong Rev & Income Growth', 'Strong Rev, Neg Income','Inconsistent Growth', 'Declining Growth', 'Other']
+        ss.categories_list = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income','Inconsistent Growth', 'Declining Growth', 'Other']
         
         ss.editable_stock_growth_analysis_df=st.data_editor(styled, width='stretch', hide_index=True, disabled=disabled_cols
                     ,column_config= {
