@@ -10,7 +10,6 @@ import pandas as pd
 import altair as alt
 import yfinance as yf
 import sec_edgar
-import yfinance as yf
 from icecream import ic
 from streamlit import session_state as ss
 from altair.expr import *

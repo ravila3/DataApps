@@ -402,7 +402,7 @@ def sec_edgar_financial_load(cik):
     if response.status_code == 200:
         try:
             filings_data = response.json()
-            # rite("filings_data:", filings_data) #debug
+            # st.write("filings_data:", filings_data) #debug
             company_info={key: value for key, value in filings_data.items() if not isinstance(value, (list, dict))}
             if debug_flag==1:
                 st.write('company_info',company_info) #debug
@@ -419,8 +419,10 @@ def sec_edgar_financial_load(cik):
             filings_df['fiscalYearEnd']=company_info['fiscalYearEnd']
 
             filings_df=filings_df[['cik','company_name','primary_ticker','primary_exchange','sic','sicDescription','fiscalYearEnd','accessionNumber','filingDate','reportDate','form','primaryDocument','fileNumber']]
-            filings_10q_df = filings_df[filings_df['form'] == '10-Q']
-            # st.write(f"{filings_df['form']} Filings DataFrame: {filings_10q_df}")
+            # filings_10q_10k_df = filings_df[filings_df['form'].isin(['10-Q', '10-K'])]
+            # max_filing_date = filings_10q_10k_df['filingDate'].max()
+            # max_report_date = filings_10q_10k_df['reportDate'].max()
+            # st.write(f"Filings DataFrame for filings_10q_10k_df: ",filings_10q_10k_df) # debug
 
             # Display URLs for all recent filings
             for index, filing in filings_df.iterrows():
