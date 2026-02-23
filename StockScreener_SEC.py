@@ -477,13 +477,13 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             col1, spacer1, col2, spacer2, col3 = st.columns([1, 0.1, 1, 0.1, 1])
             if chart_revenue is not None:
                 with col1:
-                    st.altair_chart(chart_revenue, width='content')
+                    st.altair_chart(chart_revenue, use_container_width=True) #, width='content'
             if chart_income is not None:
                 with col2:
-                    st.altair_chart(chart_income, width='content')
+                    st.altair_chart(chart_income, use_container_width=True)
             if chart_margin is not None:
                 with col3:
-                    st.altair_chart(chart_margin, width='content')
+                    st.altair_chart(chart_margin, use_container_width=True)
         except Exception as e:
             st.write(f"Could not render regression charts due to {e}")
     
