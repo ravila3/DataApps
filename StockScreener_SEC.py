@@ -60,6 +60,10 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date)
             height=400,
             title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: ${slope/1000:,.1f}k, R²: {r2:.4f}"
         )
+        # .configure_view(
+        # continuousWidth=500,
+        # continuousHeight=350
+        # )
     )
 
     # Add regression line
@@ -71,7 +75,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date)
             y="Fitted:Q"
         )
     )
-
+    
     # st.altair_chart(chart + reg_line, width='content')              
     return chart + reg_line
 
@@ -471,19 +475,31 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         
     # st.write(metrics)  # debug
     # st.write(result_df)  # debug
-    
+    # Add CSS for min-width columns
+    st.markdown("""
+        <style>
+            [data-testid="stColumn"] {
+                flex: 1 1 500px; 
+                min-width: 500px;
+            }
+            .centered-title {
+                text-align: center;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+        
     if plot_regression_bin==1:
         try:
             col1, col2, col3 = st.columns(3)
             if chart_revenue is not None:
                 with col1:
-                    st.altair_chart(chart_revenue, use_container_width=True) #, width='content'
+                    st.altair_chart(chart_revenue, width='stretch') #, width='stretch'
             if chart_income is not None:
                 with col2:
-                    st.altair_chart(chart_income, use_container_width=True)
+                    st.altair_chart(chart_income, width='stretch')
             if chart_margin is not None:
                 with col3:
-                    st.altair_chart(chart_margin, use_container_width=True)
+                    st.altair_chart(chart_margin, width='stretch')
         except Exception as e:
             st.write(f"Could not render regression charts due to {e}")
     
