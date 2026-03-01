@@ -1,23 +1,16 @@
-# Import python packages
-# import sec_edgar.financial_statements
-# import sec_edgar.utils
 import streamlit as st
+import streamlit.elements.widgets.data_editor as de
+import pyarrow as pa
 import pandas as pd
 import altair as alt
-import yfinance as yf
-import sec_edgar
-import yfinance as yf
 from icecream import ic
-from streamlit import session_state as ss
 from altair.expr import *
-# import snowflake.connector
-# from snowflake.snowpark import Session
-# from snowflake.snowpark.context import get_active_session
-# from snowflake.snowpark.functions import col
-from datetime import datetime,timedelta
 from SEC_Edgar_Loader import sec_edgar_financial_load,get_company_tickers_df
 import numpy as np
+import sys, linecache, traceback
 from stock_data_loader_utilities import postgres_update, postgres_read,yahoo_finance_load,yahoo_finance_df_format
+
+ss = st.session_state
 
 if "quarterly_financials" not in ss:
     ss.quarterly_financials = pd.DataFrame()
@@ -29,7 +22,7 @@ if "quarterly_financials" not in ss:
     ss.value_btn=0
     ss.selected_company=None
     ss.hide_menu=False
-    
+
 def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date):
 
     # Build DataFrame for Altair
@@ -60,10 +53,6 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date)
             height=400,
             title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: ${slope/1000:,.1f}k, R²: {r2:.4f}"
         )
-        # .configure_view(
-        # continuousWidth=500,
-        # continuousHeight=350
-        # )
     )
 
     # Add regression line
@@ -179,6 +168,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                - updated_quarterly_df: Original df with growth columns added
                - metrics_dict: Growth metrics including regression analysis
     """
+    
     if quarterly_df.empty or len(quarterly_df) < 8:  # Need at least 2 years of data
         return quarterly_df, None
     
@@ -473,8 +463,9 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         elif len(margin_values) > 0:
             metrics['last3_quarters_median_margin'] = np.median(margin_values)
         
+        
     # st.write(metrics)  # debug
-    # st.write(result_df)  # debug
+    # st.write(ss.selected_company)  # debug
     # Add CSS for min-width columns
     st.markdown("""
         <style>
@@ -493,13 +484,17 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             col1, col2, col3 = st.columns(3)
             if chart_revenue is not None:
                 with col1:
-                    st.altair_chart(chart_revenue, width='stretch') #, width='stretch'
+                    # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
+                    placeholder=st.empty()
+                    placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
             if chart_income is not None:
                 with col2:
-                    st.altair_chart(chart_income, width='stretch')
+                    placeholder=st.empty()
+                    placeholder.altair_chart(chart_income, width='stretch')
             if chart_margin is not None:
                 with col3:
-                    st.altair_chart(chart_margin, width='stretch')
+                    placeholder=st.empty()
+                    placeholder.altair_chart(chart_margin, width='stretch')
         except Exception as e:
             st.write(f"Could not render regression charts due to {e}")
     
@@ -532,7 +527,7 @@ def rank_companies_by_growth():
         max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
         company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
         quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
-        updated_df, metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker)
+        updated_df, metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
         updated_companies[cik] = updated_df
         
         def extract_yahoo_fields(stats):
@@ -563,22 +558,29 @@ def rank_companies_by_growth():
         trailing_pe = yf_data["trailing_pe"]
         trailing_ps = yf_data["trailing_ps"]
         forward_pe = yf_data["forward_pe"]
+        
+        def safe_round(x, n=1):
+            return round(x, n) if isinstance(x, (int, float)) else None
+
+        def safe_multiply(x, n=1):
+            return x*n if isinstance(x, (int, float)) else None
                 
         if metrics:
-            results.append({
+            try:
+                results.append({
                 'cik': cik,
                 'ticker': ticker,
                 'company_and_ticker': company_and_ticker,
                 'stock_price' : stock_price,
                 'price_range_52wks' : price_range_52wks,
-                'pct_chg_from_52wk_high' : round(pct_chg_from_52wk_high*100,1),
-                'pct_chg_from_52wk_low' : round(pct_chg_from_52wk_low*100,1),
-                'trailing_pe' : round(trailing_pe,1),
-                'forward_pe' : round(forward_pe,1),
-                'trailing_ps' : round(trailing_ps,1),
+                'pct_chg_from_52wk_high' : safe_multiply(safe_round(pct_chg_from_52wk_high,3),100),
+                'pct_chg_from_52wk_low' : safe_multiply(safe_round(pct_chg_from_52wk_low,3),100),
+                'trailing_pe' : safe_round(trailing_pe,1),
+                'forward_pe' : safe_round(forward_pe,1),
+                'trailing_ps' : safe_round(trailing_ps,1),
                 'Consolidated_Score': (
                     -100 if len(metrics['revenue_growth']) < 15
-                    else round(
+                    else safe_round(
                         (
                             metrics['median_revenue_growth'] * metrics['revenue_consistency_score'] / 100
                             + metrics['last3_quarters_median_margin'] * metrics['income_consistency_score'] / 100
@@ -587,46 +589,52 @@ def rank_companies_by_growth():
                         1
                     )
                 ),
-                'Revenue_Consistency_Score': round(metrics['revenue_consistency_score'], 1),
-                'Income_Consistency_Score': round(metrics['income_consistency_score'], 1),
-                'Median_Revenue_Growth_PCT': round(metrics['median_revenue_growth'], 2),
-                'Median_Income_Growth_PCT': round(metrics['median_income_growth'], 2),
-                'Median_Margin_Growth_PCT': round(metrics['median_margin_growth'], 2),
-                'Median_Margin_PCT': round(metrics['median_margin'], 2),
-                'Last3Q_Revenue_Growth_PCT': round(metrics['last3_quarters_revenue_growth'], 2),
-                'Last3Q_Income_Growth_PCT': round(metrics['last3_quarters_income_growth'], 2),
-                'Last3Q_Margin_Growth_PCT': round(metrics['last3_quarters_margin_growth'], 2),
-                'Last3Q_Median_Margin_PCT': round(metrics['last3_quarters_median_margin'], 2),
+                'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
+                'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
+                'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
+                'Median_Income_Growth_PCT': safe_round(metrics['median_income_growth'], 2),
+                'Median_Margin_Growth_PCT': safe_round(metrics['median_margin_growth'], 2),
+                'Median_Margin_PCT': safe_round(metrics['median_margin'], 2),
+                'Last3Q_Revenue_Growth_PCT': safe_round(metrics['last3_quarters_revenue_growth'], 2),
+                'Last3Q_Income_Growth_PCT': safe_round(metrics['last3_quarters_income_growth'], 2),
+                'Last3Q_Margin_Growth_PCT': safe_round(metrics['last3_quarters_margin_growth'], 2),
+                'Last3Q_Median_Margin_PCT': safe_round(metrics['last3_quarters_median_margin'], 2),
                 'Last3Q_Income_Positive': int(metrics['last3_quarters_income_positive_count']),
                 'Revenue_Growth_Count': len(metrics['revenue_growth']),
                 'Income_Growth_Count': len(metrics['income_growth']),
                 'Margin_Growth_Count': len(metrics['margin_growth']),
-                'Revenue_Growth_Slope': round(metrics['revenue_growth_slope'] / 1000, 2),
-                'Revenue_Growth_Median': round(metrics['revenue_growth_median'] / 1000, 2),
-                'Revenue_Growth_PCT': round(metrics['revenue_growth_slope'] * 100 / (metrics['revenue_growth_median'] if metrics['revenue_growth_median'] != 0 else 1), 2) if 'revenue_growth_slope' in metrics and 'revenue_growth_median' in metrics else 0,
+                'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
+                'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
+                'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_slope'] * 100 / (metrics['revenue_growth_median'] if metrics['revenue_growth_median'] != 0 else 1), 2) if 'revenue_growth_slope' in metrics and 'revenue_growth_median' in metrics else 0,
                 'Revenue_Growth_N': metrics['revenue_n'],
                 'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
-                'Revenue_Growth_Outlier_PCT': round(metrics['revenue_n_outliers'] / metrics['revenue_n'] * 100, 2) if metrics['revenue_n'] > 0 else 0,
-                'Revenue_R2': round(metrics['revenue_r2'], 4),
-                'Revenue_Avg_Residual_Last3': round(metrics['revenue_avg_residual_last3']/1000, 2),
-                'Income_Growth_Slope': round(metrics['income_growth_slope'] / 1000, 2),
-                'Income_Growth_Median': round(metrics['income_growth_median'] / 1000, 2),
-                'Income_Growth_PCT': round(metrics['income_growth_slope'] * 100 / abs(metrics['income_growth_median'] if metrics['income_growth_median'] != 0 else 1), 2) if 'income_growth_slope' in metrics and 'income_growth_median' in metrics else 0,
+                'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_n_outliers'] / metrics['revenue_n'] * 100, 2) if metrics['revenue_n'] > 0 else 0,
+                'Revenue_R2': safe_round(metrics['revenue_r2'], 4),
+                'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
+                'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
+                'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
+                'Income_Growth_PCT': safe_round(metrics['income_growth_slope'] * 100 / abs(metrics['income_growth_median'] if metrics['income_growth_median'] != 0 else 1), 2) if 'income_growth_slope' in metrics and 'income_growth_median' in metrics else 0,
                 'Income_Growth_N': metrics['income_n'],
                 'Income_Growth_N_Outliers': metrics['income_n_outliers'],
-                'Income_Growth_Outlier_PCT': round(metrics['income_n_outliers'] / metrics['income_n'] * 100, 2) if metrics['income_n'] > 0 else 0,
-                'Income_R2': round(metrics['income_r2'], 4),
-                'Income_Avg_Residual_Last3': round(metrics['income_avg_residual_last3']/1000, 2),
-                'Margin_Growth_Slope': round(metrics['margin_growth_slope'], 4),
-                'Margin_Growth_Median': round(metrics['margin_growth_median'], 2),
+                'Income_Growth_Outlier_PCT': safe_round(metrics['income_n_outliers'] / metrics['income_n'] * 100, 2) if metrics['income_n'] > 0 else 0,
+                'Income_R2': safe_round(metrics['income_r2'], 4),
+                'Income_Avg_Residual_Last3': safe_round(metrics['income_avg_residual_last3']/1000, 2),
+                'Margin_Growth_Slope': safe_round(metrics['margin_growth_slope'], 4),
+                'Margin_Growth_Median': safe_round(metrics['margin_growth_median'], 2),
                 'Margin_Growth_N': metrics['margin_n'],
                 'Margin_Growth_N_Outliers': metrics['margin_n_outliers'],
-                'Margin_Growth_Outlier_PCT': round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
-                'Margin_R2': round(metrics['margin_r2'], 4),
-                'Margin_Avg_Residual_Last3': round(metrics['margin_avg_residual_last3'], 2),
+                'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
+                'Margin_R2': safe_round(metrics['margin_r2'], 4),
+                'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
                 'max_filing_date': max_filing_date,
                 'max_report_date': max_report_date
             })
+            except Exception as e:
+                exc_type, exc_obj, tb = sys.exc_info()
+                filename = tb.tb_frame.f_code.co_filename
+                line_no = tb.tb_lineno
+                code_line = linecache.getline(filename, line_no).strip()
+                st.write(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
     
     results_df = pd.DataFrame(results)
     # st.dataframe(results_df)  # debug
@@ -856,7 +864,66 @@ def quantile_color(s):
     return s.apply(color)
 
 def display_analysis_summary(stock_growth_analysis_df):
+        return
+
+# set page config and title
+st.set_page_config( page_title="Stock Screener", layout="wide" )
+st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Stocks</h2>', unsafe_allow_html=True)
+st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by SEC Edgar platform. Analysis Summary and AI chat powered by mistral-large2 AI model')
+
+def main():
+
+    load_btn =analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
+
+    if ss.hide_menu==False:
+        st.write("Choose an action:")
+        load_btn = st.button("Load Financial Data from SEC")
+        analysis_btn = st.button("Perform Fundamental Analysis")
+        value_btn = st.button("Perform Value Analysis")
+        qtr_data_btn = st.button("Show Quarterly Financial Data")
+    else:
+        return_menu_btn=st.button('Return to Menu')
+
+    if return_menu_btn:
+        ss.hide_menu=False
+        ss.value_btn=False
+        ss.selected_company=None
+        st.rerun()
+
+    if load_btn:
+        ss.value_btn=0
+        write_sec_data_into_db()
+
+    if analysis_btn:
+        ss.value_btn=0
+        # column_specs=get_column_specs()
+        ss.quarterly_financials = load_sec_data_from_db()
+        # st.write(companies_data['0000353184'])  # debug
         
+        # Analyze and rank companies by growth consistency
+        if ss.quarterly_financials is not None and not ss.quarterly_financials.empty:
+            st.markdown("---")
+            st.subheader("📊 Growth Consistency Analysis")
+            
+            if ss.ranking_df.empty or ss.updated_companies=={}:
+                ss.ranking_df, ss.updated_companies = rank_companies_by_growth()
+                postgres_update(ss.ranking_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+                            
+                # Highlight top performer
+                top_company = ss.ranking_df.iloc[0]
+                # st.dataframe(top_company) # debug
+                st.success(f"🏆 Top Performer: **{top_company['company_and_ticker']}** (Score: {top_company['Revenue_Consistency_Score']:.1f})")
+                display_analysis_summary(stock_growth_analysis_df)
+                st.button("Commit Changes to Database", on_click=lambda: postgres_update(ss.editable_stock_growth_analysis_df[['cik','category','notes']], 'editable_stock_data', ['cik']))
+
+    if value_btn:
+        ss.value_btn=True
+        ss.hide_menu=True
+        st.rerun()
+        
+    if ss.value_btn==True:
+        stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
+        styled=display_analysis_summary(stock_growth_analysis_df)
         editable_columns = ['category', 'notes']
         stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
@@ -950,15 +1017,6 @@ def display_analysis_summary(stock_growth_analysis_df):
         if 'chart' not in ss.editable_stock_growth_analysis_df.columns: 
             ss.editable_stock_growth_analysis_df.insert(0, "chart", False)
         
-        # median_series = ss.editable_stock_growth_analysis_df['Revenue_Growth_Median']
-        # min_val = float(median_series.min())
-        # max_val = float(median_series.max())
-        # default_range = (min_val, max_val)
-        # low, high = st.slider(label="Median Revenue",min_value=min_val,max_value=max_val,value=default_range,format='dollar')
-        # filtered_df = ss.editable_stock_growth_analysis_df[
-        #     (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] >= low) &
-        #     (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] <= high)
-        # ]
         filtered_df = ss.editable_stock_growth_analysis_df[
             (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] <100000000000000000000000)
             # & (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= .60)
@@ -969,26 +1027,67 @@ def display_analysis_summary(stock_growth_analysis_df):
             # & (ss.editable_stock_growth_analysis_df['category']=="")
         ]
             
+        filtered_df=filtered_df.reset_index(drop=True)
+        ss.df=filtered_df.copy()        
         styled = build_styler(filtered_df)
+        # st.write("styled df:",styled) #debug
         
-        def handle_action():
-            if 'my_editor' in ss:
-                editor_state = st.session_state.get("my_editor", {})
-                edits=st.session_state['my_editor']['edited_rows']
-                for row_index, changes in edits.items():
-                    if changes.get("chart") is True:
-                        ss.selected_company = ss.editable_stock_growth_analysis_df.iloc[row_index]["cik"]
-                        # Reset checkbox        
-                        ss.editable_stock_growth_analysis_df.at[row_index, "chart"] = False
-                        changes["chart"] = False
-                    # if changes.get('category') is True or changes.get('notes') is True:
-                    #     st.toast('Saving your change')
-                    #     postgres_update(ss.editable_stock_growth_analysis_df[['cik','category','notes']], 'editable_stock_data', ['cik'])
-                # st.session_state["my_editor"] = editor_state
+        def handle():
+            if "my_editor" not in ss:
+                return
+            
+            editor_state = ss['my_editor']
+            
+            if "edited_rows" not in editor_state:
+                return
+            
+            edited = editor_state["edited_rows"]
+            # st.write(edited) #debug
+            # Always use your own stored DataFrame
+            df = ss.get("df")
+            # arrow_table = pa.Table.from_pandas('df')
 
+            if df is None:
+                return
+            
+            if "prev_edits" not in ss:
+                ss.prev_edits={}
+                
+            prev = ss.prev_edits
+            
+            new_changes = {
+                idx: changes
+                for idx, changes in edited.items()
+                if idx not in prev or prev[idx] != changes
+            }
+
+            # st.write(ss.prev_edits) #debug
+            # st.write(edited) #debug
+            # st.write(new_changes) #debug
+            
+            ss.prev_edits = edited
+            # st.write(ss.prev_edits) #debug
+
+            # Process checkbox clicks even if "data" is missing
+            for row_index, changes in new_changes.items():
+                if changes.get("chart") is True:
+                    # st.write(f"processing row {row_index}") #debug
+                    cik = df.loc[row_index, "cik"]
+                    ss.selected_company = cik
+                    # st.write(ss.selected_company) #debug
+
+                    # df.at[row_index, "chart"] = False   # Reset checkbox in your underlying df
+                    # changes["chart"] = False
+                    # edited.pop(row_index,None)
+                    # ss.df=df
+                    # st.write("editor state after:",editor_state)
+                    # st.write(f"deleted row {row_index}") #debug
+            
+            # st.write(edited)
+            
         ss.categories_list = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income','Inconsistent Growth', 'Declining Growth', 'Other']
-        
-        ss.editable_stock_growth_analysis_df=st.data_editor(styled, width='stretch', hide_index=True, disabled=disabled_cols
+        st.data_editor(styled, key="my_editor", on_change=handle, width='stretch', disabled=disabled_cols
+                    #,hide_index=True
                     ,column_config= {
                     "company_and_ticker": st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                     'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
@@ -1023,132 +1122,9 @@ def display_analysis_summary(stock_growth_analysis_df):
                     "Last3Q_Margin_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Margin Growth %", format='%.1f', width="small"),
                     "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%.1f', width="small"),
                     },
-                    key="my_editor",
-                    on_change=handle_action()
-                        )     
-        
-        return
-
-# set page config and title
-st.set_page_config( page_title="Stock Screener", layout="wide" )
-st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Stocks</h2>', unsafe_allow_html=True)
-st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by SEC Edgar platform. Analysis Summary and AI chat powered by mistral-large2 AI model')
-
-def main():
-
-    load_btn =analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
-
-    if ss.hide_menu==False:
-        st.write("Choose an action:")
-        load_btn = st.button("Load Financial Data from SEC")
-        analysis_btn = st.button("Perform Fundamental Analysis")
-        value_btn = st.button("Perform Value Analysis")
-        qtr_data_btn = st.button("Show Quarterly Financial Data")
-    else:
-        return_menu_btn=st.button('Return to Menu')
-
-    if return_menu_btn:
-        ss.hide_menu=False
-        ss.value_btn=False
-        ss.selected_company=None
-        st.rerun()
-
-    if load_btn:
-        ss.value_btn=0
-        write_sec_data_into_db()
-
-    if analysis_btn:
-        ss.value_btn=0
-        # column_specs=get_column_specs()
-        ss.quarterly_financials = load_sec_data_from_db()
-        # st.write(companies_data['0000353184'])  # debug
-        
-        # Analyze and rank companies by growth consistency
-        if ss.quarterly_financials is not None and not ss.quarterly_financials.empty:
-            st.markdown("---")
-            st.subheader("📊 Growth Consistency Analysis")
-            
-            if ss.ranking_df.empty or ss.updated_companies=={}:
-                ss.ranking_df, ss.updated_companies = rank_companies_by_growth()
-                postgres_update(ss.ranking_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-            
-            # if not ss.ranking_df.empty:
-            #     # st.dataframe(ss.ranking_df)  # debug
-            #     columns = [ 'cik', 'company_and_ticker', 'stock_price', 'price_range_52wks', 'pct_chg_from_52wk_high', 'pct_chg_from_52wk_low', 'trailing_pe', 'forward_pe', 'trailing_ps'
-            #         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median'
-            #         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
-            #         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers',
-            #         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-            #         ]
-            #     ss.ranking_df = ss.ranking_df.sort_values(by='Revenue_Growth_Slope', ascending=False)
-                
-            #     styled = ss.ranking_df[columns].style
-            #     cols_for_color_inc=['Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
-            #           , 'Revenue_R2','Income_R2','Margin_R2'
-            #           ,'Revenue_Growth_PCT','Income_Growth_PCT'
-            #           ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
-            #           ,'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT'
-            #           ]
-            #     for col in cols_for_color_inc:
-            #         styled = styled.apply(quantile_color, subset=[col])
-            #     cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
-            #     for col in cols_red_bottom_quintile:
-            #         styled = styled.apply(lambda s: ['background-color: red' if v <= s.quantile(0.4) else '' for v in s], subset=[col])
-            #     # styled = ranking_df.style.highlight_quantile(['Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope', 'Revenue_R2','Income_R2','Margin_R2'], axis=0, color='Green', q_left=0.8)
-
-            #     st.dataframe(
-            #         styled,
-            #         width='stretch',
-            #         hide_index=False,
-            #         column_config={
-            #             "company_and_ticker": st.column_config.TextColumn(pinned=True),
-            #             'stock_price': st.column_config.NumberColumn(label="Revenue Growth Slope", format='dollar'),
-            #             'price_range_52wks': st.column_config.TextColumn(),
-            #             'pct_chg_from_52wk_high':st.column_config.NumberColumn(label="% from 52wk High²", format='%.1f', width="small"),
-            #             'pct_chg_from_52wk_low':st.column_config.NumberColumn(label="% from 52wk Low", format='%.1f', width="small"),
-            #             'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", format='%.1f', width="small"),
-            #             'forward_pe':st.column_config.NumberColumn(label="P/E Fwd", format='%.1f', width="small"),
-            #             'trailing_ps':st.column_config.NumberColumn(label="P/S Trailing", format='%.1f', width="small"),
-            #             "Revenue_Growth_Slope": st.column_config.NumberColumn(label="Revenue Growth Slope", format='dollar', step='int'),
-            #             "Income_Growth_Slope": st.column_config.NumberColumn(label="Income Growth Slope", format='dollar', step='int'),
-            #             "Margin_Growth_Slope": st.column_config.NumberColumn(label="Margin Growth Slope", format='dollar'),
-            #             "Revenue_R2": st.column_config.NumberColumn(label="Revenue R²", format='%.2f', width="small"),
-            #             "Income_R2": st.column_config.NumberColumn(label="Income R²", format='%.2f', width="small"),
-            #             "Margin_R2": st.column_config.NumberColumn(label="Margin R²", format='%.2f', width="small"),
-            #             "Revenue_Avg_Residual_Last3": st.column_config.NumberColumn(label="Last 3Q Avg Residual - Revenue", format='dollar',step='int', width="small"),
-            #             "Income_Avg_Residual_Last3": st.column_config.NumberColumn(label="Last 3Q Avg Residual - Income", format='dollar',step='int', width="small"),
-            #             "Margin_Avg_Residual_Last3": st.column_config.NumberColumn(label="Last 3Q Avg Residual - Margin", format='dollar',step='int', width="small"),
-            #             "Revenue_Growth_PCT": st.column_config.NumberColumn(label="Growth % - Revenue", format='%.1f', width="small"),
-            #             "Income_Growth_PCT": st.column_config.NumberColumn(label="Growth % - Income", format='%.1f', width="small"),
-            #             "Revenue_Growth_N": st.column_config.NumberColumn(label="N Count - Revenue", step='int', width="small"),
-            #             "Income_Growth_N": st.column_config.NumberColumn(label="N Count - Income", step='int', width="small"),
-            #             "Margin_Growth_N": st.column_config.NumberColumn(label="N Count - Margin", step='int', width="small"),
-            #             "Revenue_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
-            #             "Income_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
-            #             "Margin_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
-            #             "Last3Q_Revenue_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Revenue Growth %", format='%.1f'),
-            #             "Last3Q_Income_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Income Growth %", format='%.1f'),
-            #             "Last3Q_Margin_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Margin Growth %", format='%.1f'),
-            #             "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%.1f'),
-            #             }
-            #     )
-                
-                # Highlight top performer
-                top_company = ss.ranking_df.iloc[0]
-                # st.dataframe(top_company) # debug
-                st.success(f"🏆 Top Performer: **{top_company['company_and_ticker']}** (Score: {top_company['Revenue_Consistency_Score']:.1f})")
-                display_analysis_summary(stock_growth_analysis_df)
-                st.button("Commit Changes to Database", on_click=lambda: postgres_update(ss.editable_stock_growth_analysis_df[['cik','category','notes']], 'editable_stock_data', ['cik']))
-
-    if value_btn:
-        ss.value_btn=True
-        ss.hide_menu=True
-        st.rerun()
-        
-    if ss.value_btn==True:
-        stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
-        display_analysis_summary(stock_growth_analysis_df)
-        st.button("Commit Changes to Database", on_click=lambda: postgres_update(ss.editable_stock_growth_analysis_df[['cik','category','notes']], 'editable_stock_data', ['cik']))
+                    )
+        # st.write(ss.selected_company) #debug
+        # st.write("REGISTERED CALLBACK:", handle)
                 
         if ss.selected_company is not None:
             try: 
