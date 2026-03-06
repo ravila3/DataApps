@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from icecream import ic
-from streamlit import session_state as ss
 # from snowflake.snowpark import Session
 # from snowflake.snowpark.context import get_active_session
 # from snowflake.snowpark.functions import col
@@ -17,6 +16,8 @@ from snowflake.connector.pandas_tools import write_pandas
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from sqlalchemy import create_engine
+
+ss = st.session_state
 
 # from sec_api import MappingApi
 # List of CIKs
@@ -337,7 +338,7 @@ def postgres_update(df, table_name, primary_key_columns=None):
             {", ".join(column_defs)}
         );
     """
-    st.write(create_table_sql) #debug
+    # st.write(create_table_sql) #debug
     cursor.execute(create_table_sql)
 
     # Grant permissions

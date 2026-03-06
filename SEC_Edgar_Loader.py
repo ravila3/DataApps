@@ -2,13 +2,14 @@ import requests
 import streamlit as st
 import pandas as pd
 from icecream import ic
-from streamlit import session_state as ss
 # from bs4 import BeautifulSoup
 from datetime import datetime
 # from dateutil.relativedelta import relativedelta
 from collections import OrderedDict
 import json
 import time
+
+ss = st.session_state
 
 @st.cache_data(ttl="24h")
 def get_edgar_data(url):
@@ -324,7 +325,7 @@ def sec_edgar_financial_load(cik):
     
     debug_flag=0 #debug
     frame_criteria='2025Q3' #debug '2024Q4' is an example
-    metric_criteria='AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
+    metric_criteria='Assets' # 'Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
     metrics_df=pd.DataFrame()
 
     # cik = '0000732717' #936528 1050446 1821806
@@ -333,6 +334,7 @@ def sec_edgar_financial_load(cik):
     # Define the metrics and their corresponding categories and units - Note that "I"=Include in charts, "E"=Exclude from charts
     metrics_data = [
         ('Revenues', 'Income Statement', 'USD','Revenue/Sales','I'),
+        ('RevenueFromContractsWithCustomers', 'Income Statement', 'USD','Revenue/Sales','I'),
         ('RevenueFromContractWithCustomerExcludingAssessedTax', 'Income Statement', 'USD','Revenue/Sales','I'),
         ('RevenueFromContractWithCustomerIncludingAssessedTax', 'Income Statement', 'USD','Revenue/Sales','I'),
         ('RevenuesNetOfInterestExpense', 'Income Statement', 'USD','Revenue/Sales','I'),
@@ -454,261 +456,462 @@ def sec_edgar_financial_load(cik):
             if debug_flag==1:
                 st.json(truncate_dict(companyfacts_data, metric_criteria=metric_criteria)) #debug
                 # show_all_metrics_debug(companyfacts_data) #debug
-                show_all_metrics_single_qtr(companyfacts_data,frame_criteria) #debug
+                # show_all_metrics_single_qtr(companyfacts_data,frame_criteria) #debug
                 # st.write("CompanyFacts Response:", companyfacts_data['facts']['us-gaap']['EarningsPerShareDiluted']) #debug ['units']['USD']
             # st.write("CompanyFacts Response:", companyfacts_data['facts']['us-gaap'])  #debug
             
-            for metric in ss.companyfacts_metrics_dict:
-                try:
-                    if metric in companyfacts_data['facts']['us-gaap'].keys():
-                        units = ss.companyfacts_metrics_dict[metric]['unit']
-                        # st.write(f"metric in loop = {metric}, units = {units}") #debug
-                        # st.write(companyfacts_data['facts']['us-gaap'][metric]['units']) #debug
-                        temp_df=(pd.DataFrame(companyfacts_data['facts']['us-gaap'][metric]['units'][units]))
-                        # if metric=='SellingGeneralAndAdministrativeExpense':
-                        #     st.write(companyfacts_data['facts']['us-gaap'][metric]['units'][units]) #debug
-                        # st.write(f'just created df for {metric}')
-                        temp_df=temp_df[temp_df['frame'].notna()]
-                        # temp_df=temp_df[temp_df['form'].isin(['10-Q','10-K'])]
-                        temp_df.sort_values(by='end',axis=0, ascending=False, inplace=True)
-                        temp_df['metric_label']=metric
-                        temp_df['metric']=ss.companyfacts_metrics_dict[metric]['metric']
-                        temp_df['category']=ss.companyfacts_metrics_dict[metric]['category']
-                        temp_df['chart_include']=ss.companyfacts_metrics_dict[metric]['chart_include']
-                        metrics_df=pd.concat([metrics_df,temp_df],ignore_index=True)
-                    else:
+            companyfacts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_str}.json"
+        
+            if response.status_code == 200:
+                data = response.json()
+
+                facts = data.get("facts", {})
+                rows = []
+
+                for taxonomy, taxonomy_data in facts.items():   # e.g., "us-gaap", "ifrs-full", "dei"
+                    if taxonomy not in ("us-gaap", "ifrs-full"):
                         continue
-                except KeyError as e:
-                    print(f"KeyError: {e} not found in metric {metric}")
-                except Exception as e:
-                    print(f"An error occurred: {e}")
 
-            if debug_flag==1:
-                st.write('Initial SEC EDGAR dataframe',metrics_df) #debug
+                    for metric, metric_data in taxonomy_data.items():
+                    # for metric, metric_data in data["facts"]["us-gaap"].items():
+                        units_dict = metric_data.get("units", {})
+                        # st.write(units_dict) #debug
 
-            metrics_df['cik']=cik
-            metrics_df.rename(columns={'val':'value'},inplace=True)
-            metrics_df.rename(columns={'end':'end_date'},inplace=True)
-            metrics_df['end_date'] = pd.to_datetime(metrics_df['end_date']).dt.date
-            metrics_df=metrics_df[['cik','start','end_date','category','metric','metric_label','chart_include','value','frame','fy','fp','filed']]
-            # st.write('initial metrics_df right after sourcing from SEC Edgar',metrics_df) #debug
+                        for unit, records in units_dict.items():
+                            for rec in records:
+                                    rows.append({
+                                        "taxonomy": taxonomy,
+                                        "metric_label": metric,
+                                        "filed": rec.get("filed"),
+                                        "unit": unit,
+                                        "start": rec.get("start"),
+                                        "end": rec.get("end"),
+                                        "frame": rec.get("frame"),
+                                        "val": rec.get("val"),
+                                        "accn": rec.get("accn"),
+                                        "form": rec.get("form"),
+                                        "fy": rec.get("fy"),
+                                        "fp": rec.get("fp")
+                                    })
 
-            # Extract the quarter part from the frame column with error handling
-            def extract_quarter(frame):
-                try:
-                    return frame[7]
-                except IndexError:
-                    return 0
-
-            # Add the 'frame_quarter' column only if it doesn't exist
-            if 'frame_quarter' not in metrics_df.columns:
-                # metrics_df.loc[metrics_df['category'] == 'Income Statement', 'frame_quarter'] = metrics_df['frame'].apply( lambda x: extract_quarter(x) if len(x) > 7 else 0 )
-                metrics_df['frame_quarter'] = metrics_df['frame'].apply( lambda x: extract_quarter(x) if len(x) > 7 else 0 )
-                # metrics_df['frame_quarter'] = metrics_df['frame'].apply(extract_quarter)
-
-            quarter_counts = metrics_df[metrics_df['category'] == 'Income Statement']['frame_quarter'].value_counts()
-
-            # Create a dictionary with all quarters and initialize counts to zero
-            all_quarters_counts = {str(q): 0 for q in range(1, 5)}
-
-            # Update the dictionary with the actual counts
-            for quarter, count in quarter_counts.items():
-                if quarter in all_quarters_counts:
-                    all_quarters_counts[quarter] = count
-
-            # Convert the dictionary back to a Series for compatibility
-            final_quarter_counts = pd.Series(all_quarters_counts)
-            ss.least_count_quarter = int(final_quarter_counts.idxmin())
-            # st.write(f'ss.least_count_quarter = {ss.least_count_quarter} and final_quarter_counts = ',final_quarter_counts) #debug
-
-            # Function to extract fiscal timeframe, adjusted for full year quarter alignment
-            def extract_fiscal_timeframe(row):
-                try:
-                    fiscal_year_end_month = int(company_info['fiscalYearEnd'][:2])
-
-                    quarters_adjust = 4-ss.least_count_quarter  #(fiscal_year_end_month // 3)
+                    metrics_df = pd.DataFrame(rows)
                     
-                    if len(row['frame']) < 7:
-                        year = int(row['frame'][2:6]) ######################## ALTERNATIVE YEAR EXTRACTION
-                        # year = row['end_date'].year #int(row['frame'][2:6])
-                        fiscal_timeframe = f"{year} Q4"
-                    else:
-                        year = int(row['frame'][2:6])
-                        quarter = int(row['frame'][7])
+                    # Normalize types
+                    metrics_df["start"] = pd.to_datetime(metrics_df["start"], errors="coerce")
+                    metrics_df["end"] = pd.to_datetime(metrics_df["end"], errors="coerce")
+                    metrics_df["frame"] = metrics_df["frame"].astype("string")
+                    metrics_df = metrics_df[metrics_df['end']>='2010-01-01']
                     
-                        # Adjust the quarter and year
-                        quarter += quarters_adjust
-                        if quarter > 4:
-                            quarter -= 4
-                            year += 1
+                    metric_to_category = {k: v["category"] for k, v in ss.companyfacts_metrics_dict.items()}
+                    metric_to_pretty_name = {k: v["metric"] for k, v in ss.companyfacts_metrics_dict.items()}
+                    metric_to_unit = {k: v["unit"] for k, v in ss.companyfacts_metrics_dict.items()}
+                    metric_to_chart_flag = {k: v["chart_include"] for k, v in ss.companyfacts_metrics_dict.items()}
+
+                    metrics_df["category"] = metrics_df["metric_label"].map(metric_to_category)
+                    metrics_df["metric"] = metrics_df["metric_label"].map(metric_to_pretty_name)
+                    metrics_df["default_unit"] = metrics_df["metric_label"].map(metric_to_unit)
+                    metrics_df["chart_include"] = metrics_df["metric_label"].map(metric_to_chart_flag)
+
+                    metrics_df = metrics_df[metrics_df['category'].notnull()]
                     
-                        fiscal_timeframe = f"{year} Q{quarter}"
-                
-                    return fiscal_timeframe
-                
-                except Exception as e:
-                    print(f"An error occurred in extract_timeframe: {e}, row:",row)
-                    return None
-                
-                except Exception as e:
-                    print(f"An error occurred: {e} on row:",row)
+                    if debug_flag==1:
+                        st.write('initial metrics_df',metrics_df)  #debug
+                    
+                    end_date_totals=(metrics_df
+                                    .groupby("end")
+                                    .agg(
+                                        start_date_min=("start","min"),
+                                        start_date_max=("start","max"),
+                                        total_rows=("end","count"),
+                                        distinct_frames=("frame", lambda x: x.dropna().nunique()),
+                                        frame_min=("frame","min"),
+                                        frame_max=("frame","max")
+                                    )
+                                    .reset_index()
+                                    .sort_values("end")
+                            )
+                    
+                    end_date_totals["end"] = pd.to_datetime(end_date_totals["end"], errors="coerce")
+                    
+                    # if debug_flag==1:
+                    #     st.write('initial end_date_totals',end_date_totals) #debug
+                    
+                    threshold = end_date_totals["total_rows"].quantile(0.05)
+                    end_date_totals = end_date_totals[end_date_totals['total_rows']>=threshold-15]        
+                    full_year_frames = end_date_totals["frame_min"].dropna().astype(str)
+                    full_year_frames = full_year_frames[full_year_frames.str.len() == 6]
+                    first_full_year_frame=full_year_frames.min()
+                    first_full_year_end=end_date_totals.loc[end_date_totals['frame_min'] ==first_full_year_frame,'end'].min()
+                    end_date_totals = end_date_totals[end_date_totals["end"] >= first_full_year_end]
 
-                return fiscal_timeframe
+                    base_frame = full_year_frames.min() if len(full_year_frames) > 0 else None
+                    base_year = int(base_frame[2:]) if base_frame else None
+                    
+                    def generate_corrected_frames(df, base_year):
+                        corrected = []
+                        year = base_year
+                        quarter = 1  # next quarter to emit after a full-year
 
-            metrics_df['fiscal_timeframe'] = metrics_df.apply(extract_fiscal_timeframe,axis=1)
-            metrics_df['fiscal_year'] = metrics_df['fiscal_timeframe'].str.slice(0,4).astype(int)
-            metrics_df=metrics_df[metrics_df['fiscal_year']>= 2010] #remove years before 2010
-                                  
-            metrics_df.sort_values(by='end_date',axis=0, ascending=False, inplace=True)
-            if debug_flag==1:
-                st.write('metrics_df after adding fiscal_timeframe',metrics_df) #debug
+                        for frame in df["frame_min"]:
+                            # Full-year frame → reset cycle
+                            if isinstance(frame, str) and len(frame) == 6:
+                                corrected.append(f"CY{year}")
+                                year += 1
+                                quarter = 1  # reset quarter cycle
+                            else:
+                                # Quarter frame
+                                corrected.append(f"CY{year}Q{quarter}")
+                                quarter += 1
+                                if quarter == 4:  # after Q3, next is full-year
+                                    quarter = 1
 
-            # st.write('metrics_df after applying fiscal timeframe',metrics_df) #debug show metrics df after applying fiscal timeframes just before assigning to quarter and annual dataframes
+                        return corrected
+                    
+                    end_date_totals["corrected_frame"] = generate_corrected_frames(end_date_totals, base_year)
+                    
+                    if debug_flag==1:
+                        st.write('end_date_totals',end_date_totals) #debug
+                    
+                    end_date_metric_totals = (
+                        metrics_df
+                        .groupby(["metric", "end"])
+                        .agg(
+                            start_date_min=("start", "min"),
+                            start_date_max=("start", "max"),
+                            total_rows=("end", "count"),
+                            distinct_frames=("frame", lambda x: x.dropna().nunique()),
+                            frame_min=("frame", "min"),
+                            frame_max=("frame", "max")
+                        )
+                        .reset_index()
+                        .sort_values(["metric", "end"])
+                    )                
 
-            metrics_qtr_df = metrics_df.copy()
-            # Remove income-statement rows whose period length is longer than a quarter
-            # Ensure start/end are datetimes then compute duration in days
-            metrics_qtr_df['start_dt'] = pd.to_datetime(metrics_qtr_df['start'], errors='coerce')
-            metrics_qtr_df['end_dt'] = pd.to_datetime(metrics_qtr_df['end_date'], errors='coerce')
-            metrics_qtr_df['duration_days'] = (metrics_qtr_df['end_dt'] - metrics_qtr_df['start_dt']).dt.days
-            # Define quarter threshold (about 92 days). Filter out Income Statement rows longer than a quarter.
-            quarter_days = 100
-            
-            if debug_flag==1:
-                st.write('metrics_qtr_df right before pivoting, before removing duplicates or quarters spanning too many days', metrics_qtr_df) #debug [metrics_qtr_df['metric'] == 'RevenueFromContractWithCustomerExcludingAssessedTax']) #debug
-            
-            metrics_qtr_df = metrics_qtr_df[~((metrics_qtr_df['category'].isin(['Income Statement', 'Per Share Metrics'])) & (metrics_qtr_df['duration_days'] > quarter_days))]
-            
-            pivoted_qtr_df = ic(metrics_qtr_df.pivot_table(index=['fiscal_timeframe','cik'], columns='metric', values='value', aggfunc='max').reset_index())
-            pivoted_qtr_df = pivoted_qtr_df.merge( metrics_qtr_df[['fiscal_timeframe', 'end_date']], on='fiscal_timeframe', how='left' ).drop_duplicates() # Display the pivoted DataFrame st.write('pivoted_qtr_df:'
-            # pivoted_qtr_df['Depreciation & Amortization'] = (pivoted_qtr_df["Accumulated Depreciation"].diff().clip(lower=0).fillna(0))
+                    metric_end_with_frames = (
+                        end_date_metric_totals
+                        .loc[end_date_metric_totals["distinct_frames"] > 0, ["metric", "end"]]
+                    )
+                    
+                    metric_end_with_frames_index = pd.MultiIndex.from_frame(metric_end_with_frames)
 
-            pivoted_qtr_df = compute_depreciation_and_amortization(pivoted_qtr_df)
+                    # Build a MultiIndex for the main DF
+                    row_index = pd.MultiIndex.from_arrays([metrics_df["metric"], metrics_df["end"]])
 
-            EBITDA_cols = [
-                'Net Income', 'Depreciation & Amortization' # 'Depreciation', 'Amortization'
-                'Interest Expense', 'Income Tax'
-            ]
+                    # Boolean mask: rows that SHOULD have a frame
+                    should_have_frame = row_index.isin(metric_end_with_frames_index)
 
-            for col in EBITDA_cols:
-                if col not in pivoted_qtr_df:
-                    pivoted_qtr_df[col] = 0
+                    # Boolean mask: rows that DO NOT have a frame
+                    missing_frame = metrics_df["frame"].isna()
 
-            pivoted_qtr_df['EBITDA'] = pivoted_qtr_df[EBITDA_cols].sum(axis=1)
-            pivoted_qtr_df.loc[pivoted_qtr_df['EBITDA'] == 0, 'EBITDA'] = None
+                    # Drop rows where both conditions are true
+                    metrics_df = metrics_df[~(should_have_frame & missing_frame)]
 
-            # st.write('pivoted_qtr_df right after creation',pivoted_qtr_df) #debug
+                    # Mapping: end → start_date_max
+                    end_to_start_max = (
+                        end_date_metric_totals
+                        .set_index(["metric", "end"])["start_date_max"]
+                    )
 
-            def dedup_list_preserving_order(list):
-                deduped_list=[]
-                seen = set()
-                for metric in list:
-                    if metric not in seen:
-                        deduped_list.append(metric)
-                        seen.add(metric)
-                return(deduped_list)    
+                    # st.write('metrics_df mid cleanup', metrics_df) #debug
+                    
+                    # Identify (metric, end) pairs with NO frames
+                    metric_end_no_frames = (
+                        end_date_metric_totals
+                        .loc[end_date_metric_totals["distinct_frames"] == 0, ["metric", "end"]]
+                    )
+                    metric_end_no_frames_index = pd.MultiIndex.from_frame(metric_end_no_frames)
 
-            ss.unique_metric_list=[]
-            for item in ss.companyfacts_metrics_dict.values():
-                    ss.unique_metric_list.append(item['metric'])
+                    # Build row-level MultiIndex
+                    row_index = pd.MultiIndex.from_arrays([metrics_df["metric"], metrics_df["end"]])
 
-            ss.unique_metric_list=dedup_list_preserving_order(ss.unique_metric_list)
+                    # Masks
+                    is_income = metrics_df["category"] == "Income Statement"
+                    is_no_frame_end = row_index.isin(metric_end_no_frames_index)
 
-            ss.income_statement_columns=[]
-            for item in ss.companyfacts_metrics_dict.values():
-                if item['category'] == 'Income Statement':
-                    ss.income_statement_columns.append(item['metric'])
-            ss.income_statement_columns.append('EBITDA') #add EBITDA to income statement columns
+                    expected_start = end_to_start_max.reindex(row_index).to_numpy()
+                    is_wrong_start = metrics_df["start"].to_numpy() != expected_start
 
-            ss.income_statement_columns=dedup_list_preserving_order(ss.income_statement_columns)
-
-            ss.income_statement_columns_for_chart=[]
-            for item in ss.companyfacts_metrics_dict.values():
-                if item['category'] == 'Income Statement' and item['chart_include']=='I':
-                    ss.income_statement_columns_for_chart.append(item['metric'])
-                    # st.write(f"item['metric']={item['metric']}, item['category']={item['category']}, item['chart_include']={item['chart_include']}")
-            ss.income_statement_columns_for_chart.append('EBITDA') #add EBITDA to income statement columns for charting
-           
-            ss.income_statement_columns_for_chart=dedup_list_preserving_order(ss.income_statement_columns_for_chart)
-            # st.write(f"ss.income_statement_columns_for_chart = {ss.income_statement_columns_for_chart}") #debug
-
-            ss.balance_sheet_columns=[]
-            for item in ss.companyfacts_metrics_dict.values():
-                if item['category'] == 'Balance Sheet':
-                    ss.balance_sheet_columns.append(item['metric'])
-
-            ss.balance_sheet_columns=dedup_list_preserving_order(ss.balance_sheet_columns)
-
-            # st.write(ss.income_statement_metrics) #debug
-
-            # unique_metric_list = list(set(item['metric'] for item in ss.companyfacts_metrics_dict.values()))
-            # st.write(f"unique_metric_list: {ss.unique_metric_list}") #debug
-            desired_order = ['cik','fiscal_timeframe','end_date'] + ss.unique_metric_list
-            pivoted_qtr_df=pivoted_qtr_df.reindex(columns=desired_order)
-            pivoted_qtr_df.sort_values(by='fiscal_timeframe', ascending=False, inplace=True)
-            if debug_flag==1:
-                st.write('pivoted_qtr_df',pivoted_qtr_df) #debug
-
-            def remove_q4_from_annual_timeframes(fiscal_timeframe_value):
-                year = fiscal_timeframe_value[0:4]
-                return f"{year}"
-
-            # st.write('metrics_df just before metrics_annual_df created',metrics_df) #debug
-            # metrics_annual_df=metrics_df[((metrics_df['category']=='Balance Sheet') & (metrics_df['fiscal_timeframe'].str.endswith('Q4'))) | (metrics_df['fiscal_timeframe'].str.len()<=5)]
-            metrics_annual_df=metrics_df[metrics_df['fiscal_timeframe'].str.endswith('Q4')]
-            
-            metrics_annual_df['fiscal_timeframe']=metrics_annual_df['fiscal_timeframe'].apply(remove_q4_from_annual_timeframes)
-            if debug_flag==1:
-                st.write('metrics_annual_df just before pivot:',metrics_annual_df) #[metrics_qtr_df['metric'] == 'Revenues']) #debug
-
-            pivoted_annual_df = ic(metrics_annual_df.pivot_table(index=['fiscal_timeframe','cik'], columns='metric', values='value', aggfunc='max').reset_index())
-            max_end_dates = metrics_annual_df.groupby(['fiscal_timeframe', 'cik'])['end_date'].max().reset_index()
-            pivoted_annual_df = pd.merge(pivoted_annual_df, max_end_dates, on=['fiscal_timeframe', 'cik'])
-            
-            for col in EBITDA_cols:
-                if col not in pivoted_annual_df:
-                    pivoted_annual_df[col] = 0
-
-            pivoted_annual_df['EBITDA'] = pivoted_annual_df[EBITDA_cols].sum(axis=1)
-            
-            if debug_flag==1:
-                st.write('pivoted_annual_df:',pivoted_annual_df) #debug
-
-            # pivoted_annual_df = pivoted_annual_df.merge( metrics_annual_df[['fiscal_timeframe', 'end_date']], on='fiscal_timeframe', how='left' ).drop_duplicates() # Display the pivoted DataFrame st.write('pivoted_qtr_df:'
-            pivoted_annual_df=pivoted_annual_df.reindex(columns=desired_order)
-            pivoted_annual_df.sort_values(by='fiscal_timeframe', ascending=False, inplace=True)
-            # st.write('pivoted_annual_df:',pivoted_annual_df) #debug
-
-            # Function to calculate missing quarter values
-            def calculate_missing_quarters(annual_df, qtr_df):
-                for metric in annual_df.columns:
-                    if metric == 'fiscal_timeframe':
-                        continue
-                    for year in annual_df['fiscal_timeframe']:
-                        try:
-                            if int(year)>=2015:
-                                annual_value = annual_df.loc[annual_df['fiscal_timeframe'] == year, metric].values[0]
-                                q_values = []
-                                for q in ['Q1', 'Q2', 'Q3', 'Q4']:
-                                    q_value = qtr_df.loc[qtr_df['fiscal_timeframe'] == f'{year} {q}', metric].values
-                                    if pd.isna(q_value[0]):
-                                        q_values.append(None)
-                                    else:
-                                        q_values.append(q_value[0])
-
-                                # st.write(f'metric={metric}, q_values={q_values}') #debug
-                            # Calculate the missing quarter
-                                if q_values.count(None) == 1:
-                                    missing_index = q_values.index(None)
-                                    calculated_value = annual_value - sum([q for q in q_values if q is not None])
-                                    qtr_df.loc[qtr_df['fiscal_timeframe'] == f'{year} Q{missing_index + 1}', metric] = calculated_value
-                                    # st.write(f"metric={metric}, year={year}, annual_value={annual_value}, q_values={q_values}, calculated_value={calculated_value}") #debug
+                    # Final filter
+                    drop_mask = is_income & is_no_frame_end & is_wrong_start
+                    metrics_df = metrics_df[~drop_mask]                 
+                    
+                    metrics_df = metrics_df.drop_duplicates(subset=["start", "end","metric_label"])
+                                    
+                    # restate the frame in temp_df
+                    end_to_corrected = (
+                        end_date_totals
+                        .set_index("end")["corrected_frame"]
+                        .to_dict()
+                    )
+                    
+                    metrics_df = metrics_df.rename(columns={"frame": "frame_from_SEC"})
+                    
+                    metrics_df["frame"] = metrics_df["end"].map(end_to_corrected)
+                    metrics_df = metrics_df[metrics_df['frame'].notna()]    
+                    # st.write('metrics_df after cleanup', metrics_df) #debug
                                 
-                        except Exception as e:
-                            print(f"An error occurred calculating missing values: {e}, metric={metric}, year={year}")
+                # for metric in ss.companyfacts_metrics_dict:
+                #     try:
+                #         if metric in ['LongTermDebt']: # companyfacts_data['facts']['us-gaap'].keys():
+                #             units = ss.companyfacts_metrics_dict[metric]['unit']
+                #             # st.write(f"metric in loop = {metric}, units = {units}") #debug
+                #             # st.write(companyfacts_data['facts']['us-gaap'][metric]['units']) #debug
+                #             temp_df=(pd.DataFrame(companyfacts_data['facts']['us-gaap'][metric]['units'][units]))
+                #             if 'start' not in temp_df.columns:
+                #                 temp_df['start']=''
+                #             st.write('temp_df',temp_df) #debug
+                #             temp_df["frame"] = temp_df["frame"].astype("string")
+                            
+                #             # st.write("temp_df",temp_df) #debug
+                            
+                #             # if end_date_totals['distinct_frames']==0, get has count(frame is not null)=0:
+                #             # get frame from next end date and subtract 1 from the end digit
+                #             # if metric=='SellingGeneralAndAdministrativeExpense':
+                #             # st.write(companyfacts_data['facts']['us-gaap'][metric]['units'][units]) #debug
+                #             # st.write(f'just created df for {metric}')
+                #             # temp_df=temp_df[temp_df['frame'].notna()]
+                #             # temp_df=temp_df[temp_df['form'].isin(['10-Q','10-K'])]
+                #             temp_df.sort_values(by='end',axis=0, ascending=False, inplace=True)
+                #             temp_df['metric_label']=metric
+                #             temp_df['metric']=ss.companyfacts_metrics_dict[metric]['metric']
+                #             temp_df['category']=ss.companyfacts_metrics_dict[metric]['category']
+                #             temp_df['chart_include']=ss.companyfacts_metrics_dict[metric]['chart_include']
+                #             metrics_df=pd.concat([metrics_df,temp_df],ignore_index=True)
+                #         else:
+                #             continue
+                #     except KeyError as e:
+                #         st.write(f"KeyError: {e} not found in metric {metric}")
+                #     except Exception as e:
+                #         st.write(f"An error occurred: {e}")
+
+                if debug_flag==1:
+                    st.write('Initial SEC EDGAR dataframe',metrics_df) #debug
+
+                metrics_df['cik']=cik
+                metrics_df.rename(columns={'val':'value'},inplace=True)
+                metrics_df.rename(columns={'end':'end_date'},inplace=True)
+                # metrics_df['end_date'] = pd.to_datetime(metrics_df['end_date']).dt.date
+                metrics_df=metrics_df[['cik','start','end_date','category','metric','metric_label','chart_include','value','frame','fy','fp','filed']]
+                # st.write('initial metrics_df right after sourcing from SEC Edgar',metrics_df) #debug
+
+                # Extract the quarter part from the frame column with error handling
+                def extract_quarter(frame):
+                    try:
+                        return frame[7]
+                    except IndexError:
+                        return 0
+
+                # Add the 'frame_quarter' column only if it doesn't exist
+                if 'frame_quarter' not in metrics_df.columns:
+                    # metrics_df.loc[metrics_df['category'] == 'Income Statement', 'frame_quarter'] = metrics_df['frame'].apply( lambda x: extract_quarter(x) if len(x) > 7 else 0 )
+                    metrics_df['frame_quarter'] = metrics_df['frame'].apply( lambda x: extract_quarter(x) if len(x) > 7 else 0 )
+                    # metrics_df['frame_quarter'] = metrics_df['frame'].apply(extract_quarter)
+
+                quarter_counts = metrics_df[metrics_df['category'] == 'Income Statement']['frame_quarter'].value_counts()
+
+                # Create a dictionary with all quarters and initialize counts to zero
+                all_quarters_counts = {str(q): 0 for q in range(1, 5)}
+
+                # Update the dictionary with the actual counts
+                for quarter, count in quarter_counts.items():
+                    if quarter in all_quarters_counts:
+                        all_quarters_counts[quarter] = count
+
+                # Convert the dictionary back to a Series for compatibility
+                final_quarter_counts = pd.Series(all_quarters_counts)
+                ss.least_count_quarter = int(final_quarter_counts.idxmin())
+                # st.write(f'ss.least_count_quarter = {ss.least_count_quarter} and final_quarter_counts = ',final_quarter_counts) #debug
+
+                # Function to extract fiscal timeframe, adjusted for full year quarter alignment
+                def extract_fiscal_timeframe(row):
+                    try:
+                        fiscal_year_end_month = int(company_info['fiscalYearEnd'][:2])
+
+                        quarters_adjust = 4-ss.least_count_quarter  #(fiscal_year_end_month // 3)
+                        
+                        if len(row['frame']) < 7:
+                            year = int(row['frame'][2:6]) ######################## ALTERNATIVE YEAR EXTRACTION
+                            # year = row['end_date'].year #int(row['frame'][2:6])
+                            fiscal_timeframe = f"{year} Q4"
+                        else:
+                            year = int(row['frame'][2:6])
+                            quarter = int(row['frame'][7])
+                        
+                            # Adjust the quarter and year
+                            quarter += quarters_adjust
+                            if quarter > 4:
+                                quarter -= 4
+                                year += 1
+                        
+                            fiscal_timeframe = f"{year} Q{quarter}"
+                    
+                        return fiscal_timeframe
+                    
+                    except Exception as e:
+                        print(f"An error occurred in extract_timeframe: {e}, row:",row)
+                        return None
+                    
+                    except Exception as e:
+                        print(f"An error occurred: {e} on row:",row)
+
+                    return fiscal_timeframe
+
+                metrics_df['fiscal_timeframe'] = metrics_df.apply(extract_fiscal_timeframe,axis=1)
+                metrics_df['fiscal_year'] = metrics_df['fiscal_timeframe'].str.slice(0,4).astype(int)
+                metrics_df=metrics_df[metrics_df['fiscal_year']>= 2010] #remove years before 2010
+                                    
+                metrics_df.sort_values(by='end_date',axis=0, ascending=False, inplace=True)
+                if debug_flag==1:
+                    st.write('metrics_df after adding fiscal_timeframe',metrics_df) #debug
+
+                # st.write('metrics_df after applying fiscal timeframe',metrics_df) #debug show metrics df after applying fiscal timeframes just before assigning to quarter and annual dataframes
+
+                metrics_qtr_df = metrics_df.copy()
+                # Remove income-statement rows whose period length is longer than a quarter
+                # Ensure start/end are datetimes then compute duration in days
+                metrics_qtr_df['start_dt'] = pd.to_datetime(metrics_qtr_df['start'], errors='coerce')
+                metrics_qtr_df['end_dt'] = pd.to_datetime(metrics_qtr_df['end_date'], errors='coerce')
+                metrics_qtr_df['duration_days'] = (metrics_qtr_df['end_dt'] - metrics_qtr_df['start_dt']).dt.days
+                # Define quarter threshold (about 92 days). Filter out Income Statement rows longer than a quarter.
+                quarter_days = 100
+                
+                if debug_flag==1:
+                    st.write('metrics_qtr_df right before pivoting, before removing duplicates or quarters spanning too many days', metrics_qtr_df) #debug [metrics_qtr_df['metric'] == 'RevenueFromContractWithCustomerExcludingAssessedTax']) #debug
+                
+                metrics_qtr_df = metrics_qtr_df[~((metrics_qtr_df['category'].isin(['Income Statement', 'Per Share Metrics'])) & (metrics_qtr_df['duration_days'] > quarter_days))]
+                
+                pivoted_qtr_df = ic(metrics_qtr_df.pivot_table(index=['fiscal_timeframe','cik'], columns='metric', values='value', aggfunc='max').reset_index())
+                pivoted_qtr_df = pivoted_qtr_df.merge( metrics_qtr_df[['fiscal_timeframe', 'end_date']], on='fiscal_timeframe', how='left' ).drop_duplicates() # Display the pivoted DataFrame st.write('pivoted_qtr_df:'
+                # pivoted_qtr_df['Depreciation & Amortization'] = (pivoted_qtr_df["Accumulated Depreciation"].diff().clip(lower=0).fillna(0))
+                # st.write('pivoted_qtr_df',pivoted_qtr_df) #debug
+                
+                pivoted_qtr_df = compute_depreciation_and_amortization(pivoted_qtr_df)
+
+                EBITDA_cols = [
+                    'Net Income', 'Depreciation & Amortization' # 'Depreciation', 'Amortization'
+                    'Interest Expense', 'Income Tax'
+                ]
+
+                for col in EBITDA_cols:
+                    if col not in pivoted_qtr_df:
+                        pivoted_qtr_df[col] = 0
+
+                pivoted_qtr_df['EBITDA'] = pivoted_qtr_df[EBITDA_cols].sum(axis=1)
+                pivoted_qtr_df.loc[pivoted_qtr_df['EBITDA'] == 0, 'EBITDA'] = None
+
+                # st.write('pivoted_qtr_df right after creation',pivoted_qtr_df) #debug
+
+                def dedup_list_preserving_order(list):
+                    deduped_list=[]
+                    seen = set()
+                    for metric in list:
+                        if metric not in seen:
+                            deduped_list.append(metric)
+                            seen.add(metric)
+                    return(deduped_list)    
+
+                ss.unique_metric_list=[]
+                for item in ss.companyfacts_metrics_dict.values():
+                        ss.unique_metric_list.append(item['metric'])
+
+                ss.unique_metric_list=dedup_list_preserving_order(ss.unique_metric_list)
+
+                ss.income_statement_columns=[]
+                for item in ss.companyfacts_metrics_dict.values():
+                    if item['category'] == 'Income Statement':
+                        ss.income_statement_columns.append(item['metric'])
+                ss.income_statement_columns.append('EBITDA') #add EBITDA to income statement columns
+
+                ss.income_statement_columns=dedup_list_preserving_order(ss.income_statement_columns)
+
+                ss.income_statement_columns_for_chart=[]
+                for item in ss.companyfacts_metrics_dict.values():
+                    if item['category'] == 'Income Statement' and item['chart_include']=='I':
+                        ss.income_statement_columns_for_chart.append(item['metric'])
+                        # st.write(f"item['metric']={item['metric']}, item['category']={item['category']}, item['chart_include']={item['chart_include']}")
+                ss.income_statement_columns_for_chart.append('EBITDA') #add EBITDA to income statement columns for charting
+            
+                ss.income_statement_columns_for_chart=dedup_list_preserving_order(ss.income_statement_columns_for_chart)
+                # st.write(f"ss.income_statement_columns_for_chart = {ss.income_statement_columns_for_chart}") #debug
+
+                ss.balance_sheet_columns=[]
+                for item in ss.companyfacts_metrics_dict.values():
+                    if item['category'] == 'Balance Sheet':
+                        ss.balance_sheet_columns.append(item['metric'])
+
+                ss.balance_sheet_columns=dedup_list_preserving_order(ss.balance_sheet_columns)
+
+                # st.write(ss.income_statement_metrics) #debug
+
+                # unique_metric_list = list(set(item['metric'] for item in ss.companyfacts_metrics_dict.values()))
+                # st.write(f"unique_metric_list: {ss.unique_metric_list}") #debug
+                desired_order = ['cik','fiscal_timeframe','end_date'] + ss.unique_metric_list
+                pivoted_qtr_df=pivoted_qtr_df.reindex(columns=desired_order)
+                pivoted_qtr_df.sort_values(by='fiscal_timeframe', ascending=False, inplace=True)
+                if debug_flag==1:
+                    st.write('pivoted_qtr_df',pivoted_qtr_df) #debug
+
+                def remove_q4_from_annual_timeframes(fiscal_timeframe_value):
+                    year = fiscal_timeframe_value[0:4]
+                    return f"{year}"
+
+                # st.write('metrics_df just before metrics_annual_df created',metrics_df) #debug
+                # metrics_annual_df=metrics_df[((metrics_df['category']=='Balance Sheet') & (metrics_df['fiscal_timeframe'].str.endswith('Q4'))) | (metrics_df['fiscal_timeframe'].str.len()<=5)]
+                metrics_annual_df=metrics_df[metrics_df['fiscal_timeframe'].str.endswith('Q4')]
+                
+                metrics_annual_df['fiscal_timeframe']=metrics_annual_df['fiscal_timeframe'].apply(remove_q4_from_annual_timeframes)
+                if debug_flag==1:
+                    st.write('metrics_annual_df just before pivot:',metrics_annual_df) #[metrics_qtr_df['metric'] == 'Revenues']) #debug
+
+                pivoted_annual_df = ic(metrics_annual_df.pivot_table(index=['fiscal_timeframe','cik'], columns='metric', values='value', aggfunc='max').reset_index())
+                max_end_dates = metrics_annual_df.groupby(['fiscal_timeframe', 'cik'])['end_date'].max().reset_index()
+                pivoted_annual_df = pd.merge(pivoted_annual_df, max_end_dates, on=['fiscal_timeframe', 'cik'])
+                
+                for col in EBITDA_cols:
+                    if col not in pivoted_annual_df:
+                        pivoted_annual_df[col] = 0
+
+                pivoted_annual_df['EBITDA'] = pivoted_annual_df[EBITDA_cols].sum(axis=1)
+                
+                if debug_flag==1:
+                    st.write('pivoted_annual_df:',pivoted_annual_df) #debug
+
+                # pivoted_annual_df = pivoted_annual_df.merge( metrics_annual_df[['fiscal_timeframe', 'end_date']], on='fiscal_timeframe', how='left' ).drop_duplicates() # Display the pivoted DataFrame st.write('pivoted_qtr_df:'
+                pivoted_annual_df=pivoted_annual_df.reindex(columns=desired_order)
+                pivoted_annual_df.sort_values(by='fiscal_timeframe', ascending=False, inplace=True)
+                # st.write('pivoted_annual_df:',pivoted_annual_df) #debug
+
+                # Function to calculate missing quarter values
+                def calculate_missing_quarters(annual_df, qtr_df):
+                    for metric in annual_df.columns:
+                        if metric == 'fiscal_timeframe':
+                            continue
+                        for year in annual_df['fiscal_timeframe']:
+                            try:
+                                if int(year)>=2015:
+                                    annual_value = annual_df.loc[annual_df['fiscal_timeframe'] == year, metric].values[0]
+                                    q_values = []
+                                    for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+                                        q_value = qtr_df.loc[qtr_df['fiscal_timeframe'] == f'{year} {q}', metric].values
+                                        if pd.isna(q_value[0]):
+                                            q_values.append(None)
+                                        else:
+                                            q_values.append(q_value[0])
+
+                                    # st.write(f'metric={metric}, q_values={q_values}') #debug
+                                # Calculate the missing quarter
+                                    if q_values.count(None) == 1:
+                                        missing_index = q_values.index(None)
+                                        calculated_value = annual_value - sum([q for q in q_values if q is not None])
+                                        qtr_df.loc[qtr_df['fiscal_timeframe'] == f'{year} Q{missing_index + 1}', metric] = calculated_value
+                                        # st.write(f"metric={metric}, year={year}, annual_value={annual_value}, q_values={q_values}, calculated_value={calculated_value}") #debug
+                                    
+                            except Exception as e:
+                                print(f"An error occurred calculating missing values: {e}, metric={metric}, year={year}")
 
             # st.write('pivoted_qtr_df prior to calculating missing quarters',pivoted_qtr_df,'pivoted_annual_df prior to calculating missing quarters',pivoted_annual_df) #debug
             # Run the calculation
+
             calculate_missing_quarters(pivoted_annual_df, pivoted_qtr_df)            
               
             if debug_flag==1:
@@ -719,5 +922,11 @@ def sec_edgar_financial_load(cik):
     else:
         print(f"Request failed with status code {response.status_code}")
         print(response.text)
+    
+    pivoted_qtr_df['end_date']=pd.to_datetime(pivoted_qtr_df["end_date"], errors="coerce")
+    # pivoted_qtr_df['start_date']=pd.to_datetime(pivoted_qtr_df["start_date"], errors="coerce")
+    
+    pivoted_annual_df['end_date']=pd.to_datetime(pivoted_annual_df["end_date"], errors="coerce")
+    # pivoted_annual_df['start_date']=pd.to_datetime(pivoted_annual_df["start_date"], errors="coerce")
 
     return filings_df, pivoted_qtr_df, pivoted_annual_df
