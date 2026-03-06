@@ -19,11 +19,12 @@ if "quarterly_financials" not in ss:
     ss.styled_editable_stock_growth_analysis_df = pd.DataFrame()
     ss.metrics={}
     ss.updated_companies={}
-    ss.value_btn=0
+    ss.value_btn=False
+    ss.analysis_btn=False
     ss.selected_company=None
     ss.hide_menu=False
 
-def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date):
+def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date, median):
 
     # Build DataFrame for Altair
     plot_df = pd.DataFrame({
@@ -34,6 +35,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date)
     })
     
     # st.write(plot_df) #debug
+    slope_pct = (slope / median * 100) if median != 0 else 0
 
     # Chart
     chart = (
@@ -51,7 +53,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date)
         .properties(
             width=800,
             height=400,
-            title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: ${slope/1000:,.1f}k, R²: {r2:.4f}"
+            title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: {slope_pct:,.1f}%, R²: {r2:.4f}"
         )
     )
 
@@ -96,7 +98,6 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin):
     median = np.median(y[~np.isnan(y)])  # ignore NaNs for median
     mad = np.median(np.abs(y[~np.isnan(y)] - median))
 
-
     if mad == 0:
         mask = ~np.isnan(y)
     else:
@@ -130,11 +131,15 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin):
     # for i, v in enumerate(y):
     #     debug_rows.append({
     #         "index": i,
+    #         "end_date": end_date[i],
     #         "value": float(v),
     #         "z_score": float(z[i]),
     #         "kept": bool(mask[i])
     #     })
-    # st.write(f"Outlier debug for {var_name} (company {name}):", debug_rows) # debug
+
+    # debug_df = pd.DataFrame(debug_rows)
+    # st.write(f"Debug dataframe for {name}, {var_name} variable")
+    # st.dataframe(debug_df)    
 
     # Need at least 6 points after filtering
     if len(y_clean) >= 6:
@@ -148,7 +153,7 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin):
         ss_tot = np.sum((y_clean - np.mean(y_clean)) ** 2)
         r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
         if plot_regression_bin==1:
-            chart=plot_regression_line(name, var_name, X_clean, y_clean, y_pred_plot, slope, r2, end_date_clean) #debug
+            chart=plot_regression_line(name, var_name, X_clean, y_clean, y_pred_plot, slope, r2, end_date_clean, median) #debug
         else:
             chart=None
 
@@ -514,6 +519,7 @@ def rank_companies_by_growth():
     # st.write(list(companies_dict.items())[:5])  # debug   
     
     cik_list=ss.quarterly_financials['cik'].unique() #{'0000066740','0001368514'}#,'0001070494','0000318306','0001018724','0000789019','0000002488','0001045810','0000034782','0001652044','0000320193','0001018724','0001326801','0001730168','0001318605','0001067983','0000059478'} #debug
+    # cik_list = cik_list[:20] #debug run just top 20 companies
     progress_bar = st.progress(0)
     total = len(cik_list)
     status = st.empty()
@@ -743,7 +749,8 @@ def write_sec_data_into_db():
     #debug this only selects a few CIKs for testing
     # cik_list={'0000066740','0001368514'}#,'0001070494','0000318306','0001018724','0000789019','0000002488','0001045810','0000034782','0001652044','0000320193','0001018724','0001326801','0001730168','0001318605','0001067983','0000059478'} #debug
     
-    cik_list = ss.company_lookup_df['cik'].tolist() #[:2] - limit to first 2 CIKs for testing
+    cik_list = ss.company_lookup_df['cik'].tolist()
+    # cik_list=cik_list[6000:] #[:2] - limit to first 2 CIKs for testing
     
     companies_data = {}  # Store company data for analysis
     
@@ -919,7 +926,7 @@ def display_analysis_summary(stock_growth_analysis_df):
                 ,'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT'
             ]
         cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
-        cols_for_color_dec = ['trailing_pe','trailing_ps','forward_pe','pct_chg_from_52wk_high']
+        cols_for_color_dec = ['trailing_pe','trailing_ps','forward_pe','pct_chg_from_52wk_high','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
 
         q_inc = compute_quantiles(df, cols_for_color_inc)
         q_dec = compute_quantiles(df, cols_for_color_dec)
@@ -968,22 +975,30 @@ def display_analysis_summary(stock_growth_analysis_df):
         max_revenue_median_filter = st.number_input("Max Revenue Median?",value=max_revenue_median,min_value=0,max_value=max_revenue_median,step=1000000, format="%d")
         max_trailing_pe =  st.number_input("Max trailing PE (0 = None)?",value=0,min_value=0,max_value=300,step=10, format="%d")
         max_trailing_ps =  st.number_input("Max trailing PS (0=None)?",value=0,min_value=0,max_value=300,step=10, format="%d")
+        min_revenue_r2 = st.number_input("Min Revenue R2 (0=None)?",value=0.00,min_value=0.00,max_value=1.00,step=0.10, format="%.2f")
 
     with col2:
         min_revenue_growth_filter = st.number_input("Min Revenue Growth?",value=0,min_value=0,max_value=10,step=1, format="%d")
         min_income_growth_filter = st.number_input("Min Income Growth?",value=0,min_value=0,max_value=10,step=1, format="%d")
         min_last3_income_positive = st.number_input("Min Last 3 Positive Income?",value=0,min_value=0,max_value=3,step=1, format="%d")
         min_revenue_n_count_filter = st.number_input("Min revenue N count?",value=10,min_value=0,max_value=100,step=10, format="%d")
+        max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0=None)?",value=0,min_value=0,max_value=100,step=5, format="%d")
+
     
     mask = (
         (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] < max_revenue_median_filter)
         & (ss.editable_stock_growth_analysis_df['category'].isin(category_filter))
-        # & (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= .80)
         & (ss.editable_stock_growth_analysis_df['Revenue_Growth_N'] >= min_revenue_n_count_filter)
         & (ss.editable_stock_growth_analysis_df['Revenue_Growth_PCT'] >= min_revenue_growth_filter)
         & (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= min_income_growth_filter)
         & (ss.editable_stock_growth_analysis_df['Last3Q_Income_Positive'] >= min_last3_income_positive)
     )
+    
+    if min_revenue_r2 != 0:
+        mask &= (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= min_revenue_r2)
+
+    if max_rev_outlier_pct != 0:
+        mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_Outlier_PCT'] <=  max_rev_outlier_pct)
     
     if max_trailing_pe != 0:
         mask &= (ss.editable_stock_growth_analysis_df['trailing_pe'] <= max_trailing_pe)
@@ -1046,7 +1061,11 @@ def display_analysis_summary(stock_growth_analysis_df):
                 update_df['category']=new_category
                 update_df['notes']=new_notes
 
-                postgres_update(update_df, 'editable_stock_data', ['cik'])        
+                try:
+                    postgres_update(update_df, 'editable_stock_data', ['cik']) 
+                    st.toast('Change Committed to DB')
+                except Exception as e:
+                    st.warning(f'Change failed due to {e}')
         
         # st.write(edited)
         
@@ -1099,7 +1118,12 @@ def display_analysis_summary(stock_growth_analysis_df):
             # st.dataframe(quarterly_df) # debug
             analyze_yoy_growth(quarterly_df,company_and_ticker,plot_regression_bin=1)
         except Exception as e:
-            st.warning(f"Regression failed: {e}")
+            exc_type, exc_obj, tb = sys.exc_info()
+            filename = tb.tb_frame.f_code.co_filename
+            line_no = tb.tb_lineno
+            code_line = linecache.getline(filename, line_no).strip()
+            st.warning(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
+            # st.warning(f"Regression failed: {e}")
 
     return
 
@@ -1114,9 +1138,9 @@ def main():
 
     if ss.hide_menu==False:
         st.write("Choose an action:")
-        load_btn = st.button("Load Financial Data from SEC")
-        analysis_btn = st.button("Perform Fundamental Analysis")
-        value_btn = st.button("Perform Value Analysis")
+        value_btn = st.button("View Stock Data and Update Categories")
+        load_btn = st.button("Load Financial Data from SEC (All Companies)")
+        analysis_btn = st.button("Get Yahoo Stock Data and Run Statistical Analysis (All Companies)")
         qtr_data_btn = st.button("Show Quarterly Financial Data")
     else:
         return_menu_btn=st.button('Return to Menu')
@@ -1128,34 +1152,47 @@ def main():
         st.rerun()
 
     if load_btn:
-        ss.value_btn=0
+        ss.analysis_btn=ss.value_btn=False
         write_sec_data_into_db()
 
-    if analysis_btn:
-        ss.value_btn=0
+    if analysis_btn or ss.analysis_btn==True:
+        ss.value_btn=False
+        ss.analysis_btn=True
         # column_specs=get_column_specs()
-        ss.quarterly_financials = load_quarterly_sec_data_from_db()
+        with st.spinner(f"Loadiing SEC Data"):
+            ss.quarterly_financials = load_quarterly_sec_data_from_db()
         # st.write(companies_data['0000353184'])  # debug
         
         # Analyze and rank companies by growth consistency
         if ss.quarterly_financials is not None and not ss.quarterly_financials.empty:
-            st.markdown("---")
+            # st.markdown("---")
             st.subheader("📊 Growth Consistency Analysis")
             
             if ss.ranking_df.empty or ss.updated_companies=={}:
+                # st.write('Test') #debug
                 ss.ranking_df, ss.updated_companies = rank_companies_by_growth()
-                st.write(ss.updated_companies) #debug
-                postgres_update(ss.ranking_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-                            
+                placeholder=st.empty()
+                with placeholder:
+                    with st.spinner(f"Saving Analysis Results to DB"):
+                        postgres_update(ss.ranking_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+                placeholder.empty()
                 # Highlight top performer
                 top_company = ss.ranking_df.iloc[0]
                 # st.dataframe(top_company) # debug
-                st.success(f"🏆 Top Performer: **{top_company['company_and_ticker']}** (Score: {top_company['Revenue_Consistency_Score']:.1f})")
-                
+                st.write(f"🏆 Top Performer: **{top_company['company_and_ticker']}** (Score: {top_company['Revenue_Consistency_Score']:.1f})")
             else:
-                display_analysis_summary(stock_growth_analysis_df)
+                st.write('Collected data from Yahoo and Processed & Saved Regression Analysis')
+                # with st.spinner("Loading Analysis Summary from DB"):
+                #     stock_growth_analysis_df=load_stock_growth_analysis_data_from_db()
+                # display_analysis_summary(stock_growth_analysis_df)
+        
+        with st.spinner("Loading Analysis Summary from DB"):
+            stock_growth_analysis_df=load_stock_growth_analysis_data_from_db()
+        ss.hide_menu=True
+        display_analysis_summary(stock_growth_analysis_df)
 
     if value_btn:
+        ss.analysis_btn=False
         ss.value_btn=True
         ss.hide_menu=True
         st.rerun()
