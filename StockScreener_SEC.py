@@ -1318,7 +1318,7 @@ def display_analysis_summary(stock_growth_analysis_df):
                 "category": st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 'price_range_52wks': st.column_config.TextColumn(),
-                "notes": st.column_config.TextColumn(label="Notes", pinned=True, width="medium"),
+                "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
                 'pct_chg_from_52wk_high':st.column_config.NumberColumn(label="% from 52wk High²", format='%.1f', width="small"),
                 'pct_chg_from_52wk_low':st.column_config.NumberColumn(label="% from 52wk Low", format='%.1f', width="small"),
                 'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", format='%.1f', width="small"),
