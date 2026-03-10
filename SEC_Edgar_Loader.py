@@ -251,6 +251,7 @@ def truncate_dict(d, metric_criteria=None, level=0, max_levels=3, path=None):
         ]
 
     return d
+
 @st.cache_data(ttl='24h')
 def get_company_tickers_df() -> pd.DataFrame:
 
@@ -265,6 +266,8 @@ def get_company_tickers_df() -> pd.DataFrame:
         return pd.DataFrame(columns=['ticker', 'company_name', 'cik', 'company_and_ticker'])
 
     df = pd.DataFrame.from_dict(payload, orient='index')
+    # st.write(df) #debug
+    
     # Ensure expected columns exist
     for col in ('ticker', 'title', 'cik_str'):
         if col not in df.columns:

@@ -59,7 +59,8 @@ snowflake._legacy==1.0.0
 snowflake.core==1.0.5
 sortedcontainers==2.4.0
 soupsieve==2.6
-streamlit==1.54.0
+streamlit==1.55.0
+streamlit_extras
 tenacity==9.0.0
 threadpoolctl==3.6.0
 toml==0.10.2

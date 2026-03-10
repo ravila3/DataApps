@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.elements.widgets.data_editor as de
+from streamlit_extras.stylable_container import stylable_container
 import pyarrow as pa
 import pandas as pd
 import altair as alt
@@ -9,6 +10,9 @@ from SEC_Edgar_Loader import sec_edgar_financial_load,get_company_tickers_df
 import numpy as np
 import sys, linecache, traceback
 from stock_data_loader_utilities import postgres_update, postgres_read,yahoo_finance_load,yahoo_finance_df_format
+from datetime import date
+import uuid
+
 
 ss = st.session_state
 
@@ -17,13 +21,16 @@ if "quarterly_financials" not in ss:
     ss.ranking_df = pd.DataFrame()
     ss.editable_stock_growth_analysis_df = pd.DataFrame()
     ss.styled_editable_stock_growth_analysis_df = pd.DataFrame()
+    ss.company_lookup_df = pd.DataFrame()
+    ss.transactions_table = pd.DataFrame()
     ss.metrics={}
     ss.updated_companies={}
     ss.value_btn=False
     ss.analysis_btn=False
     ss.selected_company=None
     ss.hide_menu=False
-
+    ss.show_transaction_form=False
+    
 def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date, median):
 
     # Build DataFrame for Altair
@@ -53,7 +60,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         .properties(
             width=800,
             height=400,
-            title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: {slope_pct:,.1f}%, R²: {r2:.4f}"
+            # title=f"{var_name.replace('_', ' ')} Regression for {name}, Slope: {slope_pct:,.1f}%, R²: {r2:.4f}"
         )
     )
 
@@ -162,7 +169,6 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin):
         avg_residual_last3 = residuals[-last_n:].mean()
     return slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart
 
-# ===== Growth Analysis Functions =====
 def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     """
     Analyze year-over-year growth consistency for a company.
@@ -490,14 +496,20 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             if chart_revenue is not None:
                 with col1:
                     # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
+                    revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
+                    st.write(f"Revenue Regression for {name}, Slope: {revenue_slope_pct:,.1f}%, R²: {metrics['revenue_r2']:.4f}")
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
             if chart_income is not None:
                 with col2:
+                    income_slope_pct = (metrics['income_growth_slope'] / metrics['income_growth_median'] * 100) if metrics['income_growth_median'] != 0 else 0
+                    st.write(f"Income Regression for {name}, Slope: {income_slope_pct:,.1f}%, R²: {metrics['income_r2']:.4f}")
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_income, width='stretch')
             if chart_margin is not None:
                 with col3:
+                    margin_slope_pct = (metrics['margin_growth_slope'] / metrics['margin_growth_median'] * 100) if metrics['margin_growth_median'] != 0 else 0
+                    st.write(f"Margin Regression for {name}, Slope: {margin_slope_pct:,.1f}%, R²: {metrics['margin_r2']:.4f}")
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_margin, width='stretch')
         except Exception as e:
@@ -505,8 +517,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     
     return result_df, metrics
 
-
-def rank_companies_by_growth():
+def rank_companies_by_growth(cik_list):
     """
     Rank companies by growth consistency.
     Args: companies_dict: Dictionary with company names as keys and quarterly DataFrames as values
@@ -518,12 +529,16 @@ def rank_companies_by_growth():
     updated_companies = {}
     # st.write(list(companies_dict.items())[:5])  # debug   
     
-    cik_list=ss.quarterly_financials['cik'].unique() #{'0000066740','0001368514'}#,'0001070494','0000318306','0001018724','0000789019','0000002488','0001045810','0000034782','0001652044','0000320193','0001018724','0001326801','0001730168','0001318605','0001067983','0000059478'} #debug
-    # cik_list = cik_list[:20] #debug run just top 20 companies
     progress_bar = st.progress(0)
     total = len(cik_list)
     status = st.empty()
     # error=0
+    
+    if ss.quarterly_financials is None or ss.quarterly_financials.empty:
+        ss.quarterly_financials = load_quarterly_sec_data_from_db()
+        st.toast('Read SEC Quarterly Financial Data from DB')
+
+    # st.write(ss.quarterly_financials) # debug
     
     for i, cik in enumerate(cik_list): # :#companies_dict.items():
         status.write(f"Processing CIK {cik} ({i+1}/{total})")
@@ -737,12 +752,51 @@ def get_column_specs_quarterly_df():
 }
     return column_specs
 
+def color_button(color_name):
+    COLORS = {
+        "blue":  "#070e79",
+        "red":   "#881915",
+        "green": "#094217",
+        "gray":  "#3e4246",
+        "orange": "#fd7e14",
+        "purple": "#6f42c1",
+        "dark gray": "#1E2024",
+        "black": '#0E1117',
+    }
+
+    color = COLORS.get(color_name, '#0E1117')  # default black
+
+    unique_key = f"btn_{color_name}_{uuid.uuid4().hex}"
+
+    return stylable_container(
+        key=unique_key,
+
+        css_styles=f"""
+            button {{
+                background-color: {color} !important;
+                color: white !important;
+
+                border: 1px solid gray !important;
+                border-radius: 6px;
+                padding: 0.2em 1.2em;
+                
+                font-size: 0.8rem !important;      /* slightly smaller text */
+                line-height: 1.0 !important;       /* tighter vertical spacing */
+                
+                margin-bottom: 10px !important;
+            }}
+            button:hover {{
+                opacity: 0.85;
+            }}
+        """
+    )
+
 def write_sec_data_into_db():
     ss.company_lookup_df=get_company_tickers_df()
     ss.company_lookup_df = (
         ss.company_lookup_df
-        .sort_values("company_and_ticker")
         .drop_duplicates(subset="cik", keep="first")
+        .sort_values("company_and_ticker")
     )
     # st.write(f"company_lookup_df = ",ss.company_lookup_df)  #debug
     
@@ -835,6 +889,16 @@ def load_stock_growth_analysis_data_from_db():
     # df_pretty=df.rename(columns={pg_col: pg_to_pretty.get(pg_col, pg_col) for pg_col in df.columns})
     return df #, companies_data
 
+def load_stock_transactions_from_db():
+    status = st.empty()
+    df = postgres_read('stock_transactions')
+    df = df.sort_values('date',ascending=False)
+    # st.dataframe(df)  # debug
+    # column_specs=get_column_specs_ranking_df()
+    # pg_to_pretty = {v["pg_name"]: k for k, v in column_specs.items()}
+    # df_pretty=df.rename(columns={pg_col: pg_to_pretty.get(pg_col, pg_col) for pg_col in df.columns})
+    return df #, companies_data
+
 def read_or_create_editable_table():
     # Try to read the editable table from the database
     try:
@@ -851,12 +915,176 @@ def read_or_create_editable_table():
             'category': [''] * len(ss.rankings_df),
             'notes': [''] * len(ss.rankings_df)
         })
+
         # st.write(editable_df)  # debug
         # Save the new DataFrame to the database
         postgres_update(editable_df, 'editable_stock_data', ['cik'])
     
     return editable_df
 
+def postgres_delete_single_transaction(row):
+    import psycopg2
+    import pandas as pd
+
+    connection_params = {
+        "user": st.secrets["postgres_financial_data"]["user"],
+        "host": st.secrets["postgres_financial_data"]["host"],
+        "port": st.secrets["postgres_financial_data"]["port"],
+        "database": st.secrets["postgres_financial_data"]["database"],
+        "password": st.secrets["postgres_financial_data"]["password"]
+    }
+
+    conn = psycopg2.connect(**connection_params)
+    cursor = conn.cursor()
+
+    delete_sql = """
+        DELETE FROM stock_transactions
+        WHERE cik = %s
+          AND date = %s
+          AND action = %s;
+    """
+
+    cursor.execute(delete_sql, (
+        row["cik"],
+        pd.to_datetime(row["date"]).date(),
+        row["action"]
+    ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def enter_stock_transaction():
+    ss.show_transaction_form=True
+
+    go_back_to_summary_btn = st.button('Go Back To Stock Analysis Summary')
+    if go_back_to_summary_btn:
+        ss.show_transaction_form=False
+        st.rerun()
+
+    if ss.company_lookup_df is None or ss.company_lookup_df.empty:
+        ss.company_lookup_df = get_company_tickers_df()
+        ss.company_lookup_df = (
+            ss.company_lookup_df
+            .drop_duplicates(subset="cik", keep="first")
+            .sort_values("company_and_ticker")
+        )
+
+    if "transaction_df" not in ss:
+        ss.transaction_df = load_stock_transactions_from_db()
+
+    if "transaction_df_prev" not in ss:
+        ss.transaction_df_prev = ss.transaction_df.copy()
+
+    if "show_transaction_form" not in ss:
+        ss.show_transaction_form = True
+
+    st.subheader("Add a Stock Transaction")
+
+    # -----------------------------
+    # ENTRY FORM
+    # -----------------------------
+    if ss.show_transaction_form:
+        with st.form("trade_entry_form"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                trade_date = st.date_input("Trade Date", value=date.today())
+                company_list = ss.company_lookup_df["company_and_ticker"].tolist()
+                company_and_ticker = st.selectbox("Company", options=company_list)
+                action = st.selectbox("Action", ["Buy", "Sell"])
+
+            with col2:
+                quantity = st.number_input("Quantity", min_value=1, step=1)
+                price = st.number_input("Price per Share", min_value=0.00, step=0.01, format="%.2f")
+
+            submit_add = st.form_submit_button("Add Transaction")
+
+        if submit_add:
+            cik = ss.company_lookup_df.loc[
+                ss.company_lookup_df["company_and_ticker"] == company_and_ticker, "cik"
+            ].iloc[0]
+
+            new_row = {
+                "cik": cik,
+                "date": trade_date,
+                "company_and_ticker": company_and_ticker,
+                "action": action,
+                "quantity": quantity,
+                "price": price,
+                "total": quantity * price,
+            }
+
+            postgres_update(pd.DataFrame([new_row]), "stock_transactions",
+                            primary_key_columns=["cik", "date", "action"])
+
+            ss.transaction_df = pd.concat([ss.transaction_df, pd.DataFrame([new_row])], ignore_index=True)
+            ss.transaction_df_prev = ss.transaction_df.copy()
+
+            st.toast("Transaction added successfully.")
+
+    st.divider()
+
+    # -----------------------------
+    # EDITABLE TABLE
+    # -----------------------------
+    st.subheader("Edit or Delete Transactions")
+
+    edited_df = st.data_editor(
+        ss.transaction_df,
+        num_rows="dynamic",
+        column_config= {
+            'quantity': st.column_config.NumberColumn(label="Quantity", step='int'),
+            'price': st.column_config.NumberColumn(label="Price", format='dollar'),
+            'total': st.column_config.NumberColumn(label="Total Amount", format='dollar')
+            },
+        hide_index=True,
+    )
+
+    # -----------------------------
+    # DETECT DELETIONS
+    # -----------------------------
+    deleted_rows = ss.transaction_df_prev[
+        ~ss.transaction_df_prev.apply(tuple, 1).isin(edited_df.apply(tuple, 1))
+    ]
+
+    for _, row in deleted_rows.iterrows():
+        postgres_delete_single_transaction(row)
+        st.toast("Transaction deleted.")
+
+    # -----------------------------
+    # DETECT ADDITIONS
+    # -----------------------------
+    new_rows = edited_df[
+        ~edited_df.apply(tuple, 1).isin(ss.transaction_df_prev.apply(tuple, 1))
+    ]
+
+    for _, row in new_rows.iterrows():
+        postgres_update(pd.DataFrame([row]), "stock_transactions",
+                        primary_key_columns=["cik", "date", "action"])
+        st.toast("New transaction added.")
+
+    # -----------------------------
+    # DETECT MODIFICATIONS
+    # -----------------------------
+    merged = edited_df.merge(ss.transaction_df_prev, indicator=True, how="outer")
+    modified = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
+
+    for _, row in modified.iterrows():
+        postgres_update(pd.DataFrame([row]), "stock_transactions",
+                        primary_key_columns=["cik", "date", "action"])
+        st.toast("Transaction updated.")
+
+    # -----------------------------
+    # UPDATE SESSION STATE
+    # -----------------------------
+    ss.transaction_df = edited_df
+    ss.transaction_df_prev = edited_df.copy()
+
+    if st.button("Exit Transaction Entry and Return to Stock Analysis"):
+        ss.show_transaction_form = False
+        st.rerun()
+        
 def quantile_color(s):
     bottom_q = s.quantile(0.2)
     top_q = s.quantile(0.8)
@@ -872,6 +1100,7 @@ def quantile_color(s):
     return s.apply(color)
 
 def display_analysis_summary(stock_growth_analysis_df):
+        
     editable_columns = ['category', 'notes']
     stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
@@ -966,34 +1195,40 @@ def display_analysis_summary(stock_growth_analysis_df):
         ss.editable_stock_growth_analysis_df.insert(0, "chart", False)
     
     # categories = ss.editable_stock_growth_analysis_df['category'].unique().tolist()
-    ss.categories_list = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income','Inconsistent Growth', 'Declining Growth', 'Other', '']
+    ss.categories_list = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income','Inconsistent Growth', 'Declining Growth', 'Other', 'Uncategorized']
     max_revenue_median = int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1)    
     
     col1, col2 = st.columns(2)
     with col1:
         category_filter = st.multiselect('Which categories to include?',options=ss.categories_list,default=['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income'])
         max_revenue_median_filter = st.number_input("Max Revenue Median?",value=max_revenue_median,min_value=0,max_value=max_revenue_median,step=1000000, format="%d")
-        max_trailing_pe =  st.number_input("Max trailing PE (0 = None)?",value=0,min_value=0,max_value=300,step=10, format="%d")
-        max_trailing_ps =  st.number_input("Max trailing PS (0=None)?",value=0,min_value=0,max_value=300,step=10, format="%d")
-        min_revenue_r2 = st.number_input("Min Revenue R2 (0=None)?",value=0.00,min_value=0.00,max_value=1.00,step=0.10, format="%.2f")
+        max_trailing_pe =  st.number_input("Max trailing PE (0 = No Filter)?",value=0,min_value=0,max_value=300,step=10, format="%d")
+        max_trailing_ps =  st.number_input("Max trailing PS (0 = No Filter)?",value=0,min_value=0,max_value=300,step=10, format="%d")
+        min_revenue_r2 = st.number_input("Min Revenue R2 (0 = No Filter)?",value=0.00,min_value=0.00,max_value=1.00,step=0.10, format="%.2f")
 
     with col2:
-        min_revenue_growth_filter = st.number_input("Min Revenue Growth?",value=0,min_value=0,max_value=10,step=1, format="%d")
-        min_income_growth_filter = st.number_input("Min Income Growth?",value=0,min_value=0,max_value=10,step=1, format="%d")
-        min_last3_income_positive = st.number_input("Min Last 3 Positive Income?",value=0,min_value=0,max_value=3,step=1, format="%d")
+        min_revenue_growth_filter = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",value=0,min_value=0,max_value=100,step=1, format="%d")
+        min_income_growth_filter = st.number_input("Min Quarterly Income Growth % (0 = No filter)?",value=0,min_value=0,max_value=10,step=1, format="%d")
+        min_last3_income_positive = st.number_input("Min Last 3 Positive Income Qtrs (0 to 3)?",value=0,min_value=0,max_value=3,step=1, format="%d")
         min_revenue_n_count_filter = st.number_input("Min revenue N count?",value=10,min_value=0,max_value=100,step=10, format="%d")
-        max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0=None)?",value=0,min_value=0,max_value=100,step=5, format="%d")
+        max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?",value=0,min_value=0,max_value=100,step=5, format="%d")
 
     
     mask = (
         (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] < max_revenue_median_filter)
-        & (ss.editable_stock_growth_analysis_df['category'].isin(category_filter))
         & (ss.editable_stock_growth_analysis_df['Revenue_Growth_N'] >= min_revenue_n_count_filter)
-        & (ss.editable_stock_growth_analysis_df['Revenue_Growth_PCT'] >= min_revenue_growth_filter)
-        & (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= min_income_growth_filter)
         & (ss.editable_stock_growth_analysis_df['Last3Q_Income_Positive'] >= min_last3_income_positive)
     )
+
+    mask_categories = ["" if c == "Uncategorized" else c for c in category_filter]
+    mask &= (ss.editable_stock_growth_analysis_df['category'].isin(mask_categories))
     
+    if min_revenue_growth_filter != 0:
+        mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_PCT'] >= min_revenue_growth_filter)
+    
+    if min_income_growth_filter != 0:
+        mask &= (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= min_income_growth_filter)
+
     if min_revenue_r2 != 0:
         mask &= (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= min_revenue_r2)
 
@@ -1009,9 +1244,21 @@ def display_analysis_summary(stock_growth_analysis_df):
     filtered_df = ss.editable_stock_growth_analysis_df[mask]
         
     filtered_df=filtered_df.reset_index(drop=True)
+
+    with color_button('red'):
+        update_yahoo_and_stats_btn = st.button('Hit this button to update Yahoo Stock Data for CURRENTLY SELECTED Stocks (only when stock price needs updating or selection widens)')
+
     ss.df=filtered_df.copy()        
     styled = build_styler(filtered_df)
+
     # st.write("styled df:",styled) #debug
+
+    if update_yahoo_and_stats_btn:
+        cik_list = filtered_df['cik'].tolist()
+        results_df, updated_companies = rank_companies_by_growth(cik_list)
+        with st.spinner(f"Saving Analysis Results to DB"):
+            postgres_update(results_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+        st.rerun()
     
     def on_change_handle():
         if "my_editor" not in ss:
@@ -1023,10 +1270,7 @@ def display_analysis_summary(stock_growth_analysis_df):
             return
         
         edited = editor_state["edited_rows"]
-        # st.write(edited) #debug
-        # Always use your own stored DataFrame
         df = ss.get("df")
-        # arrow_table = pa.Table.from_pandas('df')
 
         if df is None:
             return
@@ -1047,8 +1291,6 @@ def display_analysis_summary(stock_growth_analysis_df):
         # st.write(new_changes) #debug
         
         ss.prev_edits = edited
-        # st.write(ss.prev_edits) #debug
-
         # Process checkbox clicks even if "data" is missing
         for row_index, changes in new_changes.items():
             cik = df.loc[row_index, "cik"]
@@ -1066,17 +1308,17 @@ def display_analysis_summary(stock_growth_analysis_df):
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
-        
         # st.write(edited)
         
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
-                #,hide_index=True
+                ,hide_index=True
                 ,column_config= {
                 "company_and_ticker": st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
                 "category": st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 'price_range_52wks': st.column_config.TextColumn(),
+                "notes": st.column_config.TextColumn(label="Notes", pinned=True, width="medium"),
                 'pct_chg_from_52wk_high':st.column_config.NumberColumn(label="% from 52wk High²", format='%.1f', width="small"),
                 'pct_chg_from_52wk_low':st.column_config.NumberColumn(label="% from 52wk Low", format='%.1f', width="small"),
                 'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", format='%.1f', width="small"),
@@ -1134,22 +1376,67 @@ st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Fi
 
 def main():
 
+# features to build:
+# update of yahoo data for selected companies - completed 3/9/26
+# updated charts to use st.write for title to avoid getting them cut off - completed 3/9/26
+# Fixed bug causing stocks to be associated to non-primary ticker if multiple tickers exist - completed 3/9/26
+# update bought/sold shares and provide summary of rate of return
+# look for new SEC filings, perform incremental updates
+# provide info on insider transactions
+# provide info on analyst estimate revisions
+
     load_btn =analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
 
     if ss.hide_menu==False:
         st.write("Choose an action:")
-        value_btn = st.button("View Stock Data and Update Categories")
-        load_btn = st.button("Load Financial Data from SEC (All Companies)")
-        analysis_btn = st.button("Get Yahoo Stock Data and Run Statistical Analysis (All Companies)")
-        qtr_data_btn = st.button("Show Quarterly Financial Data")
+        with color_button("blue"):
+            value_btn = st.button("View Stock Data, Update Categories, Enter Stock Transactions",key='view_data_btn')
+        with color_button("red"):
+            load_btn = st.button("Load Financial Data from SEC (All Companies) - takes 2+ hours")
+        with color_button("red"):
+            analysis_btn = st.button("Get Yahoo Stock Data and Run Statistical Analysis (All Companies) - takes 30 mins")
+        with color_button("red"):
+            qtr_data_btn = st.button("Show Quarterly Financial Data")
+
     else:
-        return_menu_btn=st.button('Return to Menu')
+        with color_button('gray'):
+            return_menu_btn=st.button('Return to Menu')
 
     if return_menu_btn:
         ss.hide_menu=False
         ss.value_btn=False
         ss.selected_company=None
+        ss.show_transaction_form=False
         st.rerun()
+
+    if value_btn:
+        ss.analysis_btn=False
+        ss.value_btn=True
+        ss.hide_menu=True
+        st.rerun()
+        
+    if ss.value_btn==True:
+        if ss.show_transaction_form==False:
+            with color_button('green'):
+                enter_transaction_btn = st.button('Enter Stock Buy/Sell Transaction')
+            if enter_transaction_btn:
+                ss.show_transaction_form=True
+                st.rerun()
+            
+        if ss.show_transaction_form==True:
+            enter_stock_transaction()
+       
+        if ss.show_transaction_form==False:
+            stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
+            display_analysis_summary(stock_growth_analysis_df)
+            with color_button('gray'):
+                return_menu2_btn=st.button('Return to Menu ')
+            if return_menu2_btn:
+                ss.hide_menu=False
+                ss.value_btn=False
+                ss.selected_company=None
+                ss.show_transaction_form=False
+                st.rerun()
 
     if load_btn:
         ss.analysis_btn=ss.value_btn=False
@@ -1170,7 +1457,10 @@ def main():
             
             if ss.ranking_df.empty or ss.updated_companies=={}:
                 # st.write('Test') #debug
-                ss.ranking_df, ss.updated_companies = rank_companies_by_growth()
+                cik_list=ss.quarterly_financials['cik'].unique() #{'0000066740','0001368514'}#,'0001070494','0000318306','0001018724','0000789019','0000002488','0001045810','0000034782','0001652044','0000320193','0001018724','0001326801','0001730168','0001318605','0001067983','0000059478'} #debug
+                # cik_list = cik_list[:20] #debug run just top 20 companies
+                
+                ss.ranking_df, ss.updated_companies = rank_companies_by_growth(cik_list)
                 placeholder=st.empty()
                 with placeholder:
                     with st.spinner(f"Saving Analysis Results to DB"):
@@ -1189,16 +1479,6 @@ def main():
         with st.spinner("Loading Analysis Summary from DB"):
             stock_growth_analysis_df=load_stock_growth_analysis_data_from_db()
         ss.hide_menu=True
-        display_analysis_summary(stock_growth_analysis_df)
-
-    if value_btn:
-        ss.analysis_btn=False
-        ss.value_btn=True
-        ss.hide_menu=True
-        st.rerun()
-        
-    if ss.value_btn==True:
-        stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
         display_analysis_summary(stock_growth_analysis_df)
 
     if qtr_data_btn:
