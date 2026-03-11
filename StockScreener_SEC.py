@@ -37,6 +37,21 @@ def safe_round(x, n=1):
 def safe_multiply(x, n=1):
     return x*n if isinstance(x, (int, float)) else None
 
+def clean_number(x):
+    # Reject None
+    if x is None:
+        return None
+
+    # Reject non-numeric types
+    if not isinstance(x, (int, float)):
+        return None
+
+    # Reject NaN or Infinity
+    if math.isnan(x) or math.isinf(x):
+        return None
+
+    return x
+
 def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date, median):
 
     # Build DataFrame for Altair
@@ -531,11 +546,11 @@ def compute_value_score(company_and_ticker, m, trailing_pe, forward_pe, trailing
     - Stability
     - Valuation Pressure
     """
-    # st.write(m) # debug
+    # st.write(company_and_ticker, trailing_pe, forward_pe, trailing_ps, revenue_growth_PCT, income_growth_PCT) # debug
 
     # Hard fail for insufficient history
     try:
-        if m['revenue_n'] < 15:
+        if m['revenue_n'] < 8:
             st.write(f"Not enough data points for {company_and_ticker}")
             return -100.0, -100.0, -100.0, -100.0, -100.0
 
@@ -587,6 +602,7 @@ def compute_value_score(company_and_ticker, m, trailing_pe, forward_pe, trailing
         # --- Valuation Pressure ---
         try:
             tpe = float(trailing_pe) if trailing_pe not in (None, "") and trailing_pe>=0 else 0.0
+            tpe = min(tpe,500)
             fpe = float(forward_pe)  if forward_pe  not in (None, "") and forward_pe>=0 else 0.0
             tps = float(trailing_ps) if trailing_ps not in (None, "") else 0.0
         except Exception as e:
@@ -679,9 +695,10 @@ def rank_companies_by_growth(cik_list):
         price_range_52wks = yf_data["price_range_52wks"]
         pct_chg_from_52wk_high = yf_data["pct_chg_from_52wk_high"]
         pct_chg_from_52wk_low = yf_data["pct_chg_from_52wk_low"]
-        trailing_pe = yf_data["trailing_pe"]
-        trailing_ps = yf_data["trailing_ps"]
-        forward_pe = yf_data["forward_pe"]
+
+        trailing_pe = clean_number(yf_data.get("trailing_pe"))
+        trailing_ps = clean_number(yf_data["trailing_ps"])
+        forward_pe = clean_number(yf_data["forward_pe"])
         
         if metrics:
             try:
@@ -767,7 +784,7 @@ def rank_companies_by_growth(cik_list):
                 st.write(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
     
     results_df = pd.DataFrame(results)
-    st.dataframe(results_df)  # debug
+    # st.dataframe(results_df)  # debug
     # st.dataframe(updated_df)  # debug
     # st.json(updated_companies)  # debug
 
@@ -1567,7 +1584,7 @@ def main():
                 st.rerun()
 
     if load_btn:
-        ss.analysis_btn=ss.value_btn=False
+        ss.analysis_btn=ss.value_btn=ss.show_transaction_form=False
         write_sec_data_into_db()
 
     if analysis_btn or ss.analysis_btn==True:
