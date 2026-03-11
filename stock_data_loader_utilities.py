@@ -104,50 +104,8 @@ def write_snowflake_data(df,table_name,create_table_query,):
     conn.close()
     return
 
-# @st.cache_data(ttl="24h")
-# def get_tickers_marketstack(ticker_list):
-
-#     # Replace with your Marketstack API key - free key only allows 100 api requests
-#     api_key = '641f5f1d463000e9d6215fba76652251'
-#     base_url = "https://api.marketstack.com/v1/tickers"
-
-#     tickers = {}
-#     offset = 0
-#     limit = 100  # Number of results per page
-    
-#     for exchange in ['NYSE','NASDAQ']:
-        
-#         while True:
-#             url = f"{base_url}?access_key={api_key}&exchange={exchange}&limit={limit}&offset={offset}"
-#             response = requests.get(url)
-#             data = response.json()
-
-#             # Debugging information
-#             st.write('first stock in data node:', data['data'][0])
-
-#             # Extract symbols and names
-#             if 'data' in data:
-#                 for stock in data['data']:
-#                     try:
-#                         symbol = stock['symbol']
-#                         name = stock['name']
-#                         exchange_acronym = stock.get('stock_exchange', {}).get('acronym', '')
-#                         tickers[symbol] = {'name': name, 'exchange_acronym': exchange_acronym}
-#                     except (KeyError, TypeError) as e:
-#                         st.write(f"Error: {e}")
-
-#             # Check if there's another page
-#             if 'pagination' in data:
-#                 total = data['pagination'].get('total',None)
-#                 limit = data['pagination'].get('limit',None)
-#                 offset += limit
-#             else:
-#                 break
-
-#     return tickers
-
-
 # Function to get ticker symbols SEC EDGAR using CIKs with rate limiting
+@st.cache_data(ttl='1h')
 def get_tickers_sec(ciks, delay=0.2):
     tickers = []
     headers = {'User-Agent': 'AI Analytics & Development (rafaelavila3@gmail.com)'}

@@ -12,7 +12,7 @@ import sys, linecache, traceback
 from stock_data_loader_utilities import postgres_update, postgres_read,yahoo_finance_load,yahoo_finance_df_format
 from datetime import date
 import uuid
-
+import math
 
 ss = st.session_state
 
@@ -31,6 +31,12 @@ if "quarterly_financials" not in ss:
     ss.hide_menu=False
     ss.show_transaction_form=False
     
+def safe_round(x, n=1):
+    return round(x, n) if isinstance(x, (int, float)) else None
+
+def safe_multiply(x, n=1):
+    return x*n if isinstance(x, (int, float)) else None
+
 def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date, median):
 
     # Build DataFrame for Altair
@@ -402,7 +408,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             # st.write(len(revenue_values),len(end_date)) #debug
             slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue = perform_regression(name, "Revenue", revenue_values, end_date, plot_regression_bin)
             metrics['revenue_r2'] = r2
-            metrics['revenue_growth_slope'] = round(slope, 1)
+            metrics['revenue_growth_slope'] = safe_round(slope, 1)
             metrics['revenue_growth_median'] = median
             metrics['revenue_n'] = n
             metrics['revenue_n_outliers'] = n_outliers
@@ -429,7 +435,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     if len(income_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
         try:
             slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income = perform_regression(name, "Income", income_values, end_date, plot_regression_bin)
-            metrics['income_growth_slope'] = round(slope, 1)
+            metrics['income_growth_slope'] = safe_round(slope, 1)
             metrics['income_r2'] = r2
             metrics['income_growth_median'] = median
             metrics['income_n'] = n
@@ -454,7 +460,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         try:
             slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin = perform_regression(name, "Margin", margin_values, end_date, plot_regression_bin)
             metrics['margin_r2'] = r2
-            metrics['margin_growth_slope'] = round(slope, 1)
+            metrics['margin_growth_slope'] = safe_round(slope, 1)
             metrics['margin_avg_residual_last3'] = avg_residual_last3
             metrics['margin_growth_median'] = median
             metrics['margin_n'] = n
@@ -517,6 +523,99 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     
     return result_df, metrics
 
+def compute_value_score(company_and_ticker, m, trailing_pe, forward_pe, trailing_ps, revenue_growth_PCT, income_growth_PCT):
+    """
+    Compute a growth-adjusted valuation score using:
+    - Growth Quality
+    - Recent Momentum
+    - Stability
+    - Valuation Pressure
+    """
+    # st.write(m) # debug
+
+    # Hard fail for insufficient history
+    try:
+        if m['revenue_n'] < 15:
+            st.write(f"Not enough data points for {company_and_ticker}")
+            return -100.0, -100.0, -100.0, -100.0, -100.0
+
+        # --- Growth Quality ---
+        
+        if income_growth_PCT>20 and income_growth_PCT>(revenue_growth_PCT*2):
+            income_growth_PCT=revenue_growth_PCT*2
+        
+        GQ = safe_round((
+            0.4 * (revenue_growth_PCT * m['revenue_r2'])
+            + 0.4 * (income_growth_PCT * m['income_r2'])
+            + 0.1 * (m['margin_growth_slope'] * m['margin_r2'])
+        ),1)
+
+        # --- Recent Momentum ---
+        rev = m['last3_quarters_revenue_growth']
+        inc = m['last3_quarters_income_growth']
+
+        # Cap income growth to 2x revenue growth
+        capped_rev = min(rev, 100)
+        capped_inc = min(inc, 2 * capped_rev)
+
+        RM = safe_round(
+            (
+                0.10 * capped_rev
+                + 0.10 * capped_inc
+                - (3 - m['last3_quarters_income_positive_count'])
+            ),
+            1
+        )
+
+        # --- Stability (softened + capped) ---
+
+        rev_norm_raw = m['revenue_avg_residual_last3'] / max(abs(m['revenue_growth_median']), 1)
+        inc_norm_raw = m['income_avg_residual_last3'] / max(abs(m['income_growth_median']), 1)
+
+        # Cap extreme spikes at 25%
+        rev_norm = min(abs(rev_norm_raw), 0.25)
+        inc_norm = min(abs(inc_norm_raw), 0.25)
+
+        ST = safe_round(
+            1.5 * m['revenue_r2']
+            + 1.5 * m['income_r2']
+            - 1.5 * rev_norm
+            - 1.5 * inc_norm,
+            1
+        )
+
+        # --- Valuation Pressure ---
+        try:
+            tpe = float(trailing_pe) if trailing_pe not in (None, "") and trailing_pe>=0 else 0.0
+            fpe = float(forward_pe)  if forward_pe  not in (None, "") and forward_pe>=0 else 0.0
+            tps = float(trailing_ps) if trailing_ps not in (None, "") else 0.0
+        except Exception as e:
+            st.write(f"Error on Value_Pressure calc for {company_and_ticker}: {e}")
+            return -100.0, -100.0, -100.0, -100.0, -100.0
+
+        VP = safe_round(
+            math.log1p(tpe)
+            + math.log1p(fpe)
+            + 1.5 * math.log1p(tps),
+            1
+        )
+        
+        if VP<2:
+            VP=2.0
+            
+        # --- Final Score ---
+        score = safe_round(((GQ + RM) * ST) / VP,1)
+    
+    except Exception as e:
+        st.write(f"{company_and_ticker} had error on value calc: {e}")
+        return -100.0, -100.0, -100.0, -100.0, -100.0
+
+        
+    # st.write(m) #debug
+    # st.write(f"{company_and_ticker}: Value Score: {score}, Growth Qual: {GQ}, Recent Momentum: {RM}, Stability: {ST}, Value Pressure: {VP}") #, PE: {trailing_pe}, fwd PE:{forward_pe:.1f}, PS:{trailing_ps:.1f}")
+    # st.stop() #debug
+    return score, GQ, RM, ST, VP
+
 def rank_companies_by_growth(cik_list):
     """
     Rank companies by growth consistency.
@@ -543,13 +642,17 @@ def rank_companies_by_growth(cik_list):
     for i, cik in enumerate(cik_list): # :#companies_dict.items():
         status.write(f"Processing CIK {cik} ({i+1}/{total})")
         progress_bar.progress((i + 1) / total)
-        ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
-        max_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_filing_date'].max()
-        max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
-        company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
-        quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
-        updated_df, metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
-        updated_companies[cik] = updated_df
+        try: 
+            ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
+            max_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_filing_date'].max()
+            max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
+            company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
+            quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
+            updated_df, metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
+            updated_companies[cik] = updated_df
+        except Exception as e:
+            st.write(f"Error on {cik} in rank_companies_by_growth: {e}")
+            continue
         
         def extract_yahoo_fields(stats):
             if not stats:
@@ -580,14 +683,14 @@ def rank_companies_by_growth(cik_list):
         trailing_ps = yf_data["trailing_ps"]
         forward_pe = yf_data["forward_pe"]
         
-        def safe_round(x, n=1):
-            return round(x, n) if isinstance(x, (int, float)) else None
-
-        def safe_multiply(x, n=1):
-            return x*n if isinstance(x, (int, float)) else None
-                
         if metrics:
             try:
+                revenue_growth_PCT=round(metrics['revenue_growth_slope'] * 100 / (metrics['revenue_growth_median'] if metrics['revenue_growth_median'] != 0 else 1), 2) if 'revenue_growth_slope' in metrics and 'revenue_growth_median' in metrics else 0
+                income_growth_PCT=round(metrics['income_growth_slope'] * 100 / abs(metrics['income_growth_median'] if metrics['income_growth_median'] != 0 else 1), 2) if 'income_growth_slope' in metrics and 'income_growth_median' in metrics else 0
+                result = compute_value_score(company_and_ticker, metrics, trailing_pe,forward_pe,trailing_ps, revenue_growth_PCT, income_growth_PCT)
+                # st.write(result) #debug
+                value_score, growth_quality, recent_momentum, stability_trend, value_pressure = result
+
                 results.append({
                 'cik': cik,
                 'ticker': ticker,
@@ -599,17 +702,22 @@ def rank_companies_by_growth(cik_list):
                 'trailing_pe' : safe_round(trailing_pe,1),
                 'forward_pe' : safe_round(forward_pe,1),
                 'trailing_ps' : safe_round(trailing_ps,1),
-                'Consolidated_Score': (
-                    -100 if len(metrics['revenue_growth']) < 15
-                    else safe_round(
-                        (
-                            metrics['median_revenue_growth'] * metrics['revenue_consistency_score'] / 100
-                            + metrics['last3_quarters_median_margin'] * metrics['income_consistency_score'] / 100
-                        ) / 2
-                        - (3 - metrics['last3_quarters_income_positive_count'] * 10),
-                        1
-                    )
-                ),
+                'Consolidated_Score': value_score,
+                'Growth_Quality': growth_quality,
+                'Recent_Momentum': recent_momentum,
+                'Stability_Trend': stability_trend,
+                'Value_Pressure': value_pressure,
+                #     (
+                #     -100 if len(metrics['revenue_growth']) < 15
+                #     else safe_round(
+                #         (
+                #             metrics['median_revenue_growth'] * metrics['revenue_consistency_score'] / 100
+                #             + metrics['last3_quarters_median_margin'] * metrics['income_consistency_score'] / 100
+                #         ) / 2
+                #         - (3 - metrics['last3_quarters_income_positive_count'] * 10),
+                #         1
+                #     )
+                # ),
                 'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
                 'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
                 'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
@@ -626,7 +734,7 @@ def rank_companies_by_growth(cik_list):
                 'Margin_Growth_Count': len(metrics['margin_growth']),
                 'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
                 'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
-                'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_slope'] * 100 / (metrics['revenue_growth_median'] if metrics['revenue_growth_median'] != 0 else 1), 2) if 'revenue_growth_slope' in metrics and 'revenue_growth_median' in metrics else 0,
+                'Revenue_Growth_PCT': revenue_growth_PCT,
                 'Revenue_Growth_N': metrics['revenue_n'],
                 'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
                 'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_n_outliers'] / metrics['revenue_n'] * 100, 2) if metrics['revenue_n'] > 0 else 0,
@@ -634,7 +742,7 @@ def rank_companies_by_growth(cik_list):
                 'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
                 'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
                 'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
-                'Income_Growth_PCT': safe_round(metrics['income_growth_slope'] * 100 / abs(metrics['income_growth_median'] if metrics['income_growth_median'] != 0 else 1), 2) if 'income_growth_slope' in metrics and 'income_growth_median' in metrics else 0,
+                'Income_Growth_PCT': income_growth_PCT,
                 'Income_Growth_N': metrics['income_n'],
                 'Income_Growth_N_Outliers': metrics['income_n_outliers'],
                 'Income_Growth_Outlier_PCT': safe_round(metrics['income_n_outliers'] / metrics['income_n'] * 100, 2) if metrics['income_n'] > 0 else 0,
@@ -649,7 +757,8 @@ def rank_companies_by_growth(cik_list):
                 'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
                 'max_filing_date': max_filing_date,
                 'max_report_date': max_report_date
-            })
+                })
+                
             except Exception as e:
                 exc_type, exc_obj, tb = sys.exc_info()
                 filename = tb.tb_frame.f_code.co_filename
@@ -658,11 +767,11 @@ def rank_companies_by_growth(cik_list):
                 st.write(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
     
     results_df = pd.DataFrame(results)
-    # st.dataframe(results_df)  # debug
+    st.dataframe(results_df)  # debug
     # st.dataframe(updated_df)  # debug
     # st.json(updated_companies)  # debug
 
-    results_df = results_df.sort_values('Revenue_Growth_Slope', ascending=False)
+    results_df = results_df.sort_values('Consolidated_Score', ascending=False)
     
     return results_df, updated_companies
 
@@ -672,6 +781,10 @@ def get_column_specs_ranking_df():
         "ticker": {"pg_name": "ticker", "fmt": "{}"},
         "company_and_ticker": {"pg_name": "company_and_ticker", "fmt": "{}"},
         "Consolidated_Score": {"pg_name": "consolidated_score", "fmt": "{:.1f}"},
+        "Growth_Quality": {"pg_name": "growth_quality", "fmt": "{:.1f}"},
+        "Recent_Momentum": {"pg_name": "recent_momentum", "fmt": "{:.1f}"},
+        "Stability_Trend": {"pg_name": "stability_trend", "fmt": "{:.1f}"},
+        "Value_Pressure": {"pg_name": "value_pressure", "fmt": "{:.1f}"},
         "Revenue_Consistency_Score": {"pg_name": "revenue_consistency_score", "fmt": "{:.1f}"},
         "Income_Consistency_Score": {"pg_name": "income_consistency_score", "fmt": "{:.1f}"},
         "Median_Revenue_Growth_PCT": {"pg_name": "median_revenue_growth_pct", "fmt": "{:.2f}%"},
@@ -960,6 +1073,7 @@ def enter_stock_transaction():
     go_back_to_summary_btn = st.button('Go Back To Stock Analysis Summary')
     if go_back_to_summary_btn:
         ss.show_transaction_form=False
+        ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.iloc[0:0]
         st.rerun()
 
     if ss.company_lookup_df is None or ss.company_lookup_df.empty:
@@ -1102,9 +1216,10 @@ def quantile_color(s):
 def display_analysis_summary(stock_growth_analysis_df):
         
     editable_columns = ['category', 'notes']
-    stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
+    # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker'] + editable_columns + ['stock_price', 'price_range_52wks', 'pct_chg_from_52wk_high', 'pct_chg_from_52wk_low', 'trailing_pe', 'forward_pe', 'trailing_ps', 
+    columns = [ 'cik', 'ticker', 'company_and_ticker'] + editable_columns + ['stock_price', 'price_range_52wks', 'pct_chg_from_52wk_high', 'pct_chg_from_52wk_low', 
+        'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers',
@@ -1126,7 +1241,7 @@ def display_analysis_summary(stock_growth_analysis_df):
     
         ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.reindex(columns=columns)
         # st.dataframe(editable_stock_growth_analysis_df) # debug     
-        ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.sort_values(by='Revenue_Growth_Slope', ascending=False)
+        ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.sort_values(by='Consolidated_Score', ascending=False)
             
     @st.cache_data
     def compute_quantiles(df, cols):
@@ -1153,9 +1268,10 @@ def display_analysis_summary(stock_growth_analysis_df):
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
                 ,'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT'
+                ,'Consolidated_Score','Growth_Quality','Recent_Momentum'
             ]
         cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
-        cols_for_color_dec = ['trailing_pe','trailing_ps','forward_pe','pct_chg_from_52wk_high','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
+        cols_for_color_dec = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','pct_chg_from_52wk_high','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
 
         q_inc = compute_quantiles(df, cols_for_color_inc)
         q_dec = compute_quantiles(df, cols_for_color_dec)
@@ -1213,7 +1329,6 @@ def display_analysis_summary(stock_growth_analysis_df):
         min_revenue_n_count_filter = st.number_input("Min revenue N count?",value=10,min_value=0,max_value=100,step=10, format="%d")
         max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?",value=0,min_value=0,max_value=100,step=5, format="%d")
 
-    
     mask = (
         (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] < max_revenue_median_filter)
         & (ss.editable_stock_growth_analysis_df['Revenue_Growth_N'] >= min_revenue_n_count_filter)
@@ -1258,6 +1373,9 @@ def display_analysis_summary(stock_growth_analysis_df):
         results_df, updated_companies = rank_companies_by_growth(cik_list)
         with st.spinner(f"Saving Analysis Results to DB"):
             postgres_update(results_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+            ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.iloc[0:0]
+            st.toast('Updated stock_growth_analysis_results on DB')
+            # st.stop()
         st.rerun()
     
     def on_change_handle():
@@ -1313,9 +1431,9 @@ def display_analysis_summary(stock_growth_analysis_df):
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 ,hide_index=True
                 ,column_config= {
-                "company_and_ticker": st.column_config.TextColumn(label='Company and Ticker',pinned=True),
+                'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
-                "category": st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
+                'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
@@ -1324,6 +1442,11 @@ def display_analysis_summary(stock_growth_analysis_df):
                 'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", format='%.1f', width="small"),
                 'forward_pe':st.column_config.NumberColumn(label="P/E Fwd", format='%.1f', width="small"),
                 'trailing_ps':st.column_config.NumberColumn(label="P/S Trailing", format='%.1f', width="small"),
+                "Consolidated_Score": st.column_config.NumberColumn(label="Consol Value Score", format='%.1f', width="small"),
+                'Growth_Quality': st.column_config.NumberColumn(label="Growth_Quality", format='%.1f', width="small"),
+                'Recent_Momentum': st.column_config.NumberColumn(label="Recent_Momentum", format='%.1f', width="small"),
+                'Stability_Trend':  st.column_config.NumberColumn(label="Stability_Trend", format='%.1f', width="small"),
+                'Value_Pressure':  st.column_config.NumberColumn(label="Value_Pressure", format='%.1f', width="small"),
                 "Revenue_Growth_Slope": st.column_config.NumberColumn(label="Revenue Growth Slope", format='dollar', step='int'),
                 "Income_Growth_Slope": st.column_config.NumberColumn(label="Income Growth Slope", format='dollar', step='int'),
                 "Margin_Growth_Slope": st.column_config.NumberColumn(label="Margin Growth Slope", format='dollar'),
@@ -1377,13 +1500,18 @@ st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Fi
 def main():
 
 # features to build:
-# update of yahoo data for selected companies - completed 3/9/26
-# updated charts to use st.write for title to avoid getting them cut off - completed 3/9/26
-# Fixed bug causing stocks to be associated to non-primary ticker if multiple tickers exist - completed 3/9/26
+# create & refine consolidated value score
+# enable charts with/without outliers
 # update bought/sold shares and provide summary of rate of return
 # look for new SEC filings, perform incremental updates
 # provide info on insider transactions
 # provide info on analyst estimate revisions
+# enable multiple users
+
+# completed features:
+# update of yahoo data for selected companies - completed 3/9/26
+# updated charts to use st.write for title to avoid getting them cut off - completed 3/9/26
+# Fixed bug causing stocks to be associated to non-primary ticker if multiple tickers exist - completed 3/9/26
 
     load_btn =analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
 
