@@ -115,6 +115,22 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         .add_params(hover)
     )
     
+    tooltip_point = (
+        alt.Chart(plot_df)
+        .mark_point(size=100, opacity=0)
+        .encode(
+            x="x_label:T",
+            y=f"{var_name}:Q",
+            tooltip=[
+                alt.Tooltip("x_label:T", title="End Date"),
+                alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
+                alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
+                alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
+            ]
+        )
+        .transform_filter(hover)
+    )
+    
     line = (
         alt.Chart(plot_df)
         .mark_line(color="#4C78A8")
@@ -154,7 +170,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     )
 
     chart = (
-        reg_line + line + points + rule + ma_line
+        reg_line + line + points + rule + ma_line + tooltip_point
     ).properties(
         width=800,
         height=400,
