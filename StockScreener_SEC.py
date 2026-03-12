@@ -93,17 +93,10 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     hover = alt.selection_point(
         fields=["x_label"],
         nearest=True,
-        on="mouseover",
+        on="pointermove",
         empty=False
     )
     # st.write(plot_df) #debug
-    
-    # hover_capture = (
-    #     alt.Chart(plot_df)
-    #     .mark_rule(opacity=0)
-    #     .encode(x="x_label:T")
-    #     .add_params(hover)
-    # )
 
     points = (
         alt.Chart(plot_df)
@@ -120,12 +113,6 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             ]
         )
         .add_params(hover)
-    )
-    
-    hover_line = (
-        alt.Chart(plot_df)
-        .mark_rule(opacity=0)   # invisible but valid geometry
-        .encode(x="x_label:T")
     )
     
     line = (
@@ -167,7 +154,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     )
 
     chart = (
-        hover_line + reg_line + line + points + rule + ma_line
+        reg_line + line + points + rule + ma_line
     ).properties(
         width=800,
         height=400,
