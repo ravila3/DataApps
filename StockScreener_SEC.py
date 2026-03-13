@@ -90,7 +90,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     plot_df["Growth_12m"] =  (plot_df[var_name] / plot_df[var_name].shift(4) - 1)
     plot_df["MA4"] = plot_df[var_name].rolling(window=4).mean()
     
-    st.write(plot_df) #debug
+    # st.write(plot_df) #debug
     base = alt.Chart(plot_df).encode(x='x_label:T')
 
     nearest = alt.selection_point(fields=["x_label"], nearest=True,
@@ -126,7 +126,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             #    alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
             # ]
         )
-        #.add_params(nearest)
+        .transform_filter(nearest)
     )
     
     # points = points.add_params(nearest)
