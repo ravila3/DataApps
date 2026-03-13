@@ -94,7 +94,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     base = alt.Chart(plot_df).encode(
         x=alt.X(
             'x_label:T',
-            scale=alt.Scale(padding=10)
+            scale=alt.Scale(padding=15)
         )
     )
 
