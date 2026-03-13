@@ -90,87 +90,64 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     plot_df["Growth_12m"] =  (plot_df[var_name] / plot_df[var_name].shift(4) - 1)
     plot_df["MA4"] = plot_df[var_name].rolling(window=4).mean()
     
-    hover = alt.selection_point(
-        fields=["x_label"],
-        nearest=True,
-        on="pointerdown, pointermove", #, click
-        empty=False
-    )
-    # st.write(plot_df) #debug
+    st.write(plot_df) #debug
+    base = alt.Chart(plot_df).encode(x='x_label:T')
 
-    points = (
-        alt.Chart(plot_df)
-        .mark_point(size=20)
-        .encode(
-            x="x_label:T",
-            y=f"{var_name}:Q",
-            opacity=alt.condition(hover, alt.value(1), alt.value(0.2)),
-            tooltip=[
-                alt.Tooltip("x_label:T", title="End Date"),
-                alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
-                alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
-                alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
-            ]
-        )
-        .add_params(hover)
+    nearest = alt.selection_point(fields=["x_label"], nearest=True,
+        on="pointerdown, pointermove", # mouseover, click
+        empty='none' #False
     )
-    
-    tooltip_point = (
-        alt.Chart(plot_df)
-        .mark_point(size=100, opacity=0)
-        .encode(
-            x="x_label:T",
-            y=f"{var_name}:Q",
-            tooltip=[
-                alt.Tooltip("x_label:T", title="End Date"),
-                alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
-                alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
-                alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
-            ]
-        )
-        .transform_filter(hover)
-    )
-    
-    line = (
-        alt.Chart(plot_df)
-        .mark_line(color="#4C78A8")
-        .encode(
+
+    line = base.mark_line(color="#4C78A8").encode(
             x="x_label:T",
             y=f"{var_name}:Q"
         )
+
+    selectors = base.mark_point().add_params(nearest).encode(
+            x="x_label:T",
+            opacity=alt.value(0),
+        ).encode(
+            tooltip=[
+                alt.Tooltip("x_label:T", title="End Date"),
+                alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
+                alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
+                alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
+            ]
+        )
+
+    points = (base.mark_point(size=20).encode(
+            x="x_label:T",
+            y=f"{var_name}:Q",
+            opacity=alt.condition(nearest, alt.value(1), alt.value(0.2))
+            # tooltip=[
+            #    alt.Tooltip("x_label:T", title="End Date"),
+            #    alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
+            #    alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
+            #    alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
+            # ]
+        )
+        #.add_params(nearest)
     )
     
-    # points = points.add_params(hover)
-    rule = (
-        alt.Chart(plot_df)
-        .mark_rule(color="gray")
-        .encode(
+    # points = points.add_params(nearest)
+    rule = base.mark_rule(color="gray").encode(
             x="x_label:T",
-            opacity=alt.condition(hover, alt.value(0.3), alt.value(0))
+            opacity=alt.condition(nearest, alt.value(0.3), alt.value(0))
         )
-    )
     
-    ma_line = (
-        alt.Chart(plot_df)
-        .mark_line(color="#FFA500", strokeDash=[4, 4])  # orange dashed line
-        .encode(
-            x="x_label:T",
-            y="MA4:Q"
-        )
+    ma_line = base.mark_line(color="#FFA500", strokeDash=[4, 4]).encode(
+        x="x_label:T",
+        y="MA4:Q"
     )
     
     # Add regression line
-    reg_line = (
-        alt.Chart(plot_df)
-        .mark_line(color="red")
-        .encode(
+    reg_line = base.mark_line(color="red").encode(
             x="x_label:T",
             y="Fitted:Q"
         )
-    )
 
     chart = (
-        reg_line + line + points + rule + ma_line + tooltip_point
+        line + points + rule + ma_line + selectors
     ).properties(
         width=800,
         height=400,
@@ -179,7 +156,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             anchor="middle"
         ),
         padding={"bottom": 0}
-    )    
+    )
     
     # st.altair_chart(chart + reg_line, width='content')              
     return chart + reg_line
