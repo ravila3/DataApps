@@ -91,7 +91,12 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     plot_df["MA4"] = plot_df[var_name].rolling(window=4).mean()
     
     # st.write(plot_df) #debug
-    base = alt.Chart(plot_df).encode(x='x_label:T')
+    base = alt.Chart(plot_df).encode(
+        x=alt.X(
+            'x_label:T',
+            scale=alt.Scale(padding=10)
+        )
+    )
 
     nearest = alt.selection_point(fields=["x_label"], nearest=True,
         on="pointerover", # pointerdown, pointermove, mouseover, click
