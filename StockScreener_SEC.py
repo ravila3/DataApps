@@ -93,7 +93,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     hover = alt.selection_point(
         fields=["x_label"],
         nearest=True,
-        on="pointermove, click",
+        on="pointerdown, pointermove", #, click
         empty=False
     )
     # st.write(plot_df) #debug
