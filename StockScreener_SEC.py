@@ -94,7 +94,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     base = alt.Chart(plot_df).encode(x='x_label:T')
 
     nearest = alt.selection_point(fields=["x_label"], nearest=True,
-        on="pointerdown", # , pointermove, mouseover, click
+        on="pointerover", # pointerdown, pointermove, mouseover, click
         empty='none' #False
     )
 
