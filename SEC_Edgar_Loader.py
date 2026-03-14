@@ -8,8 +8,13 @@ from datetime import datetime
 from collections import OrderedDict
 import json
 import time
+import datetime as dt
+import logging
+from typing import Iterable, List, Dict, Tuple, Optional
+from io import StringIO
 
 ss = st.session_state
+USER_AGENT = "AI Analytics & Development (rafaelavila3@gmail.com)"
 
 @st.cache_data(ttl="24h")
 def get_edgar_data(url):
@@ -21,11 +26,11 @@ def get_edgar_data(url):
         response = requests.get(url, headers=headers)
     except requests.exceptions.RequestException as e:
         print(f"An error occurred while fetching the data: {e}")
+        logging.error(f"An error occurred while fetching the data: {e}")
         return None
     # st.write(response.text) #debug
     # st.write(f'Retrieved data for {url}')
-    return response
-    
+    return response    
 
 def show_all_metrics_single_qtr(companyfacts_data,frame_criteria): # this function is for viewing all categorizations on a filing
 
@@ -324,7 +329,43 @@ def compute_depreciation_and_amortization(pivoted_qtr_df):
 
     return pivoted_qtr_df
 
+def get_sec_filings(cik_str):
+    print('entering into get_sec_filings function')
+    debug_flag=0 #debug
+
+    # pull the list of filings from SEC Edgar
+    filings_url = f"https://data.sec.gov/submissions/CIK{cik_str}.json"
+    response=get_edgar_data(filings_url)
+    if response.status_code == 200:
+        try:
+            filings_data = response.json()
+            # st.write("filings_data:", filings_data) #debug
+            company_info={key: value for key, value in filings_data.items() if not isinstance(value, (list, dict))}
+            if debug_flag==1:
+                st.write('company_info',company_info) #debug
+            # Extract recent filings
+            filings = filings_data.get('filings', {}).get('recent', [])
+            filings_df = pd.DataFrame(filings)
+            filings_df['primary_ticker']=filings_data['tickers'][0]
+            filings_df['primary_exchange']=filings_data['exchanges'][0]
+
+            filings_df['cik']=company_info['cik']
+            filings_df['company_name']=company_info['name']
+            filings_df['sic']=company_info['sic']
+            filings_df['sicDescription']=company_info['sicDescription']
+            filings_df['fiscalYearEnd']=company_info['fiscalYearEnd']
+
+            filings_df=filings_df[['cik','company_name','primary_ticker','primary_exchange','sic','sicDescription','fiscalYearEnd','accessionNumber','filingDate','reportDate','form','primaryDocument','fileNumber']]
+            return filings_df
+        except Exception as e:
+            st.write(f"Failed to get filings from SEC: {e}")
+    else:
+        st.write(f"Failed to get SEC filings, response code {response.status_code}")
+        return None
+
+@st.cache_data(ttl='24h')
 def sec_edgar_financial_load(cik):
+    print('entering into sec_edgar_financial_load function')
     
     debug_flag=0 #debug
     frame_criteria='2025Q3' #debug '2024Q4' is an example
@@ -437,9 +478,17 @@ def sec_edgar_financial_load(cik):
                 if primary_document and accession_number: #and form in ['10-Q','10-K']
                     filing_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_number}/{primary_document}"
                     filings_df['filing_url']=filing_url
-                    # st.write(f"Filing URL for form {form}, Accession Number {accession_number}: {filing_url}")  #debug shows a list of all filings
+                #     # st.write(f"Filing URL for form {form}, Accession Number {accession_number}: {filing_url}")  #debug shows a list of all filings
+                # if max_filing_date is not None:
+                #     # Normalize the incoming date
+                #     max_filing_date = pd.to_datetime(max_filing_date)
 
-            # st.write('filings_df',filings_df) #debug
+                #     # Ensure the column is datetime
+                #     filings_df['date'] = pd.to_datetime(filings_df['date'], errors='coerce')
+
+                #     # Apply the filter
+                #     filings_df = filings_df[filings_df['date'] > max_filing_date]
+                #             # st.write('filings_df',filings_df) #debug
 
         except ValueError:
             print("Error parsing JSON response.")
@@ -653,40 +702,6 @@ def sec_edgar_financial_load(cik):
                     metrics_df = metrics_df[metrics_df['frame'].notna()]    
                     # st.write('metrics_df after cleanup', metrics_df) #debug
                                 
-                # for metric in ss.companyfacts_metrics_dict:
-                #     try:
-                #         if metric in ['LongTermDebt']: # companyfacts_data['facts']['us-gaap'].keys():
-                #             units = ss.companyfacts_metrics_dict[metric]['unit']
-                #             # st.write(f"metric in loop = {metric}, units = {units}") #debug
-                #             # st.write(companyfacts_data['facts']['us-gaap'][metric]['units']) #debug
-                #             temp_df=(pd.DataFrame(companyfacts_data['facts']['us-gaap'][metric]['units'][units]))
-                #             if 'start' not in temp_df.columns:
-                #                 temp_df['start']=''
-                #             st.write('temp_df',temp_df) #debug
-                #             temp_df["frame"] = temp_df["frame"].astype("string")
-                            
-                #             # st.write("temp_df",temp_df) #debug
-                            
-                #             # if end_date_totals['distinct_frames']==0, get has count(frame is not null)=0:
-                #             # get frame from next end date and subtract 1 from the end digit
-                #             # if metric=='SellingGeneralAndAdministrativeExpense':
-                #             # st.write(companyfacts_data['facts']['us-gaap'][metric]['units'][units]) #debug
-                #             # st.write(f'just created df for {metric}')
-                #             # temp_df=temp_df[temp_df['frame'].notna()]
-                #             # temp_df=temp_df[temp_df['form'].isin(['10-Q','10-K'])]
-                #             temp_df.sort_values(by='end',axis=0, ascending=False, inplace=True)
-                #             temp_df['metric_label']=metric
-                #             temp_df['metric']=ss.companyfacts_metrics_dict[metric]['metric']
-                #             temp_df['category']=ss.companyfacts_metrics_dict[metric]['category']
-                #             temp_df['chart_include']=ss.companyfacts_metrics_dict[metric]['chart_include']
-                #             metrics_df=pd.concat([metrics_df,temp_df],ignore_index=True)
-                #         else:
-                #             continue
-                #     except KeyError as e:
-                #         st.write(f"KeyError: {e} not found in metric {metric}")
-                #     except Exception as e:
-                #         st.write(f"An error occurred: {e}")
-
                 if debug_flag==1:
                     st.write('Initial SEC EDGAR dataframe',metrics_df) #debug
 
@@ -751,11 +766,12 @@ def sec_edgar_financial_load(cik):
                         return fiscal_timeframe
                     
                     except Exception as e:
-                        print(f"An error occurred in extract_timeframe: {e}, row:",row)
+                        print(f"An error occurred in extract_timeframe: {e}, row: {row}")
+                        logging.error(f"An error occurred in extract_timeframe: {e}, row: {row}")
                         return None
                     
-                    except Exception as e:
-                        print(f"An error occurred: {e} on row:",row)
+                    # except Exception as e:
+                    #     print(f"An error occurred: {e} on row:",row)
 
                     return fiscal_timeframe
 
@@ -920,8 +936,8 @@ def sec_edgar_financial_load(cik):
             if debug_flag==1:
                 st.write('Updated pivoted_qtr_df with calculated Q4 values:', pivoted_qtr_df) #debug
 
-        except ValueError:
-            st.write("Error parsing JSON response.")
+        except ValueError as e:
+            st.write("Error parsing JSON response on cik {cik}: {e}")
     else:
         print(f"Request failed with status code {response.status_code}")
         print(response.text)
@@ -933,3 +949,57 @@ def sec_edgar_financial_load(cik):
     # pivoted_annual_df['start_date']=pd.to_datetime(pivoted_annual_df["start_date"], errors="coerce")
 
     return filings_df, pivoted_qtr_df, pivoted_annual_df
+
+def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> pd.DataFrame:
+    """
+    Load SEC daily index (master.idx) for a given date.
+    Returns a DataFrame with columns: cik, company, form, date, path
+    """
+    all_dfs = []
+
+    current = first_date
+    today = dt.datetime.today()
+    SEC_DAILY_INDEX_BASE = "https://www.sec.gov/Archives/edgar/daily-index"
+
+    while current <= today:
+        year = current.year
+        qtr = (current.month - 1) // 3 + 1
+        url = f"{SEC_DAILY_INDEX_BASE}/{year}/QTR{qtr}/master.{current:%Y%m%d}.idx"
+        # st.write(f'loading {url}')
+
+        response = get_edgar_data(url)
+
+        # If the file doesn't exist (weekends, holidays), skip it
+        if response.status_code != 200:
+            current += dt.timedelta(days=1)
+            continue
+
+        text = response.text
+
+        df = pd.read_csv(
+            StringIO(text),
+            sep="|",
+            skiprows=10,
+            names=["cik", "company", "form", "date", "path"],
+            dtype={"cik": str},
+            engine="python"
+        )
+
+        df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+        df["cik"] = df["cik"].astype(str).str.zfill(10)
+        df["form"] = df["form"].str.upper()
+        df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
+        forms_upper = [f.upper() for f in forms_filter_list]
+        df=df[df["form"].isin(forms_upper)].reset_index(drop=True)
+        # st.write(df) #debug
+        all_dfs.append(df)
+        current += dt.timedelta(days=1)
+
+    # Combine all daily DataFrames into one
+    if all_dfs:
+        combined = pd.concat(all_dfs, ignore_index=True)
+        # st.write(combined)
+        return(combined)
+    else:
+        return pd.DataFrame(columns=["cik", "company", "form", "date", "path"])
+        
