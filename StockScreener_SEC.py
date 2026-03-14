@@ -14,7 +14,7 @@ from datetime import date
 import uuid
 import math
 import logging
-from datetime import datetime
+from datetime import datetime,timedelta
 
 logging.basicConfig(
     filename="sec_loader_errors.log",
@@ -38,6 +38,7 @@ if "quarterly_financials" not in ss:
     ss.hide_menu=False
     ss.show_transaction_form=False
     
+    
 if "filters" not in ss:
     ss.filters = {
         "category": ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income'],
@@ -50,9 +51,8 @@ if "filters" not in ss:
         "min_last3_income_positive": 0,
         "min_revenue_n_count": 10,
         "max_rev_outlier_pct": 0,
-        "min_last_filing_date": None
+        "min_last_filing_date": (datetime.today() - timedelta(days=365)).date()
     }    
-
 def safe_round(x, n=1):
     return round(x, n) if isinstance(x, (int, float)) else None
 
@@ -1466,23 +1466,59 @@ def display_analysis_summary(stock_growth_analysis_df):
     # ss.filters['max_revenue_median'] = int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1)    
     
     show_filters = st.toggle("Show Filters", value=True)
+    
+    def normalize_date_for_widget(value):
+        # None → default date
+        if value is None:
+            return datetime.date(2000, 1, 1)
+
+        # pandas Timestamp → convert to date
+        if isinstance(value, pd.Timestamp):
+            return value.date()
+
+        # datetime.datetime → convert to date
+        if isinstance(value, datetime.datetime):
+            return value.date()
+
+        # datetime.date → already good
+        if isinstance(value, datetime.date):
+            return value
+
+        # int or string → try to parse
+        try:
+            return pd.to_datetime(value).date()
+        except Exception:
+            return datetime.date(2000, 1, 1)
 
     if show_filters:    
         col1, col2 = st.columns(2)
         with col1:
-            ss.filters['category'] = st.multiselect('Which categories to include?',options=ss.categories_list,default=ss.filters['category'])
-            ss.filters['max_revenue_median'] = st.number_input("Max Revenue Median?",value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1),min_value=0,max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1),step=1000000, format="%d")
-            ss.filters['max_trailing_pe'] =  st.number_input("Max trailing PE (0 = No Filter)?",value=ss.filters['max_trailing_pe'],min_value=0,max_value=300,step=10, format="%d")
-            ss.filters['max_trailing_ps'] =  st.number_input("Max trailing PS (0 = No Filter)?",value=ss.filters['max_trailing_ps'],min_value=0,max_value=300,step=10, format="%d")
-            ss.filters['min_revenue_r2'] = st.number_input("Min Revenue R2 (0 = No Filter)?",value=ss.filters['min_revenue_r2'],min_value=0.00,max_value=1.00,step=0.10, format="%.2f")
+            ss.filters['category'] = st.multiselect('Which categories to include?', options=ss.categories_list, default=ss.filters['category'])
+            ss.filters['max_revenue_median'] = st.number_input("Max Revenue Median?", value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), min_value=0, max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), step=1000000, format="%d")
+            ss.filters['max_trailing_pe'] = st.number_input("Max trailing PE (0 = No Filter)?", value=ss.filters['max_trailing_pe'], min_value=0, max_value=300, step=10, format="%d")
+            ss.filters['max_trailing_ps'] = st.number_input("Max trailing PS (0 = No Filter)?", value=ss.filters['max_trailing_ps'], min_value=0, max_value=300, step=10, format="%d")
+            ss.filters['min_revenue_r2'] = st.number_input("Min Revenue R2 (0 = No Filter)?", value=ss.filters['min_revenue_r2'], min_value=0.00, max_value=1.00, step=0.10, format="%.2f")
+
+            # ss.filters['category'] = st.multiselect('Which categories to include?',options=ss.categories_list,default=ss.filters['category'])
+            # ss.filters['max_revenue_median'] = st.number_input("Max Revenue Median?",value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1),min_value=0,max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1),step=1000000, format="%d")
+            # ss.filters['max_trailing_pe'] =  st.number_input("Max trailing PE (0 = No Filter)?",value=ss.filters['max_trailing_pe'],min_value=0,max_value=300,step=10, format="%d")
+            # ss.filters['max_trailing_ps'] =  st.number_input("Max trailing PS (0 = No Filter)?",value=ss.filters['max_trailing_ps'],min_value=0,max_value=300,step=10, format="%d")
+            # ss.filters['min_revenue_r2'] = st.number_input("Min Revenue R2 (0 = No Filter)?",value=ss.filters['min_revenue_r2'],min_value=0.00,max_value=1.00,step=0.10, format="%.2f")
 
         with col2:
-            ss.filters['min_last_filing_date'] = st.date_input("Min Last Filing Date?",value=ss.filters['min_last_filing_date'])
-            ss.filters['min_revenue_growth'] = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",value=ss.filters['min_revenue_growth'],min_value=0,max_value=100,step=1, format="%d")
-            ss.filters['min_income_growth'] = st.number_input("Min Quarterly Income Growth % (0 = No filter)?",value=ss.filters['min_income_growth'],min_value=0,max_value=10,step=1, format="%d")
-            # ss.filters['min_last3_income_positive'] = st.number_input("Min Last 3 Positive Income Qtrs (0 to 3)?",value=ss.filters['min_last3_income_positive'],min_value=0,max_value=3,step=1, format="%d")
-            ss.filters['min_revenue_n_count'] = st.number_input("Min revenue N count?",value=10,min_value=0,max_value=ss.filters['min_revenue_n_count'],step=10, format="%d")
-            ss.filters['max_rev_outlier_pct'] = st.number_input("Max Revenue Outlier % (0 = No filter)?",value=ss.filters['max_rev_outlier_pct'],min_value=0,max_value=100,step=5, format="%d")
+
+            ss.filters['min_last_filing_date'] = st.date_input("Min Last Filing Date?",value=ss.filters['min_last_filing_date'],key="min_last_filing_date")
+            ss.filters['min_revenue_growth'] = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)", value=ss.filters['min_revenue_growth'], min_value=0, max_value=100, step=1, format="%d")
+            ss.filters['min_income_growth'] = st.number_input("Min Quarterly Income Growth % (0 = No filter)?", value=ss.filters['min_income_growth'], min_value=0, max_value=10, step=1, format="%d")
+            ss.filters['min_revenue_n_count'] = st.number_input("Min revenue N count?", value=ss.filters['min_revenue_n_count'], min_value=0, max_value=ss.filters['min_revenue_n_count'], step=10, format="%d")
+            ss.filters['max_rev_outlier_pct'] = st.number_input("Max Revenue Outlier % (0 = No filter)?", value=ss.filters['max_rev_outlier_pct'], min_value=0, max_value=100, step=5, format="%d")
+            
+            # ss.filters['min_last_filing_date'] = st.date_input("Min Last Filing Date?",key='min_last_filing_date')
+            # ss.filters['min_revenue_growth'] = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",value=ss.filters['min_revenue_growth'],min_value=0,max_value=100,step=1, format="%d")
+            # ss.filters['min_income_growth'] = st.number_input("Min Quarterly Income Growth % (0 = No filter)?",value=ss.filters['min_income_growth'],min_value=0,max_value=10,step=1, format="%d")
+            # # ss.filters['min_last3_income_positive'] = st.number_input("Min Last 3 Positive Income Qtrs (0 to 3)?",value=ss.filters['min_last3_income_positive'],min_value=0,max_value=3,step=1, format="%d")
+            # ss.filters['min_revenue_n_count'] = st.number_input("Min revenue N count?",value=10,min_value=0,max_value=ss.filters['min_revenue_n_count'],step=10, format="%d")
+            # ss.filters['max_rev_outlier_pct'] = st.number_input("Max Revenue Outlier % (0 = No filter)?",value=ss.filters['max_rev_outlier_pct'],min_value=0,max_value=100,step=5, format="%d")
 
     filters = ss.filters
     
