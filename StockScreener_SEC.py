@@ -37,7 +37,7 @@ if "quarterly_financials" not in ss:
     ss.selected_company=None
     ss.hide_menu=False
     ss.show_transaction_form=False
-    
+    ss.investment_returns=False
     
 if "filters" not in ss:
     ss.filters = {
@@ -1682,8 +1682,11 @@ def display_analysis_summary(stock_growth_analysis_df):
             pg_to_pretty = {spec["pg_name"]: pretty for pretty, spec in column_specs.items()}
             quarterly_df = quarterly_df.rename(columns=pg_to_pretty)
             # st.dataframe(quarterly_df) # debug
-            
             analyze_yoy_growth(quarterly_df,company_and_ticker,plot_regression_bin=1)
+            # st.write(ss.rankings_df) #debug
+            company_description=ss.rankings_df.loc[ss.rankings_df['cik']==cik,'company_desc'].iloc[0]
+            st.write('')
+            st.write(f":blue[{company_description}]")
         except Exception as e:
             exc_type, exc_obj, tb = sys.exc_info()
             filename = tb.tb_frame.f_code.co_filename
@@ -1693,6 +1696,244 @@ def display_analysis_summary(stock_growth_analysis_df):
             # st.warning(f"Regression failed: {e}")
 
     return
+
+def show_investment_returns():
+    transactions_df=load_stock_transactions_from_db()
+    ss.rankings_df=load_stock_growth_analysis_data_from_db()
+    transactions_df = transactions_df.merge(
+        ss.rankings_df[['cik', 'stock_price']], on='cik', how='left'
+        ).rename(columns={'stock_price': 'current_price'})
+    
+    # --- Build investment_returns_df from transactions_df and rankings_df ---
+
+    # Split buys and sells
+    buys  = transactions_df[transactions_df['action'] == 'Buy'].copy()
+    sells = transactions_df[transactions_df['action'] == 'Sell'].copy()
+
+    buys['purchase_quantity'] = buys['quantity']
+    buys['purchase_amount']   = buys['total']
+
+    sells['sold_quantity'] = sells['quantity']
+    sells['sold_amount']   = sells['total']
+
+    # Aggregate buys
+    buy_summary = buys.groupby(['cik', 'company_and_ticker']).agg(
+        purchase_quantity=('purchase_quantity', 'sum'),
+        purchase_amount=('purchase_amount', 'sum'),
+        first_purchase_date=('date', 'min')   # needed for returns
+    ).reset_index()
+
+    # Aggregate sells
+    sell_summary = sells.groupby(['cik', 'company_and_ticker']).agg(
+        sold_quantity=('sold_quantity', 'sum'),
+        sold_amount=('sold_amount', 'sum')
+    ).reset_index()
+
+    # Merge buy + sell summaries
+    investment_returns_df = (
+        buy_summary
+        .merge(sell_summary, on=['cik', 'company_and_ticker'], how='left')
+        .fillna({'sold_quantity': 0, 'sold_amount': 0})
+    )
+
+    # Average purchase price
+    investment_returns_df['avg_purchase_price'] = (
+        investment_returns_df['purchase_amount'] /
+        investment_returns_df['purchase_quantity']
+    )
+
+    # Average sold price
+    investment_returns_df['avg_sold_price'] = (
+        investment_returns_df['sold_amount'] /
+        investment_returns_df['sold_quantity'].replace(0, pd.NA)
+    )
+
+    # Current holdings
+    investment_returns_df['current_holdings'] = (
+        investment_returns_df['purchase_quantity'] -
+        investment_returns_df['sold_quantity']
+    )
+
+    # Attach current price from rankings_df
+    investment_returns_df['current_price'] = (
+        investment_returns_df['cik'].map(
+            ss.rankings_df.set_index('cik')['stock_price']
+        )
+    )
+
+    # Current holdings value
+    investment_returns_df['current_holdings_value'] = (
+        investment_returns_df['current_holdings'] *
+        investment_returns_df['current_price']
+    )
+
+    # Realized gains (simple average-cost method)
+    investment_returns_df['realized_gains'] = (
+        investment_returns_df['sold_amount'] -
+        (investment_returns_df['avg_purchase_price'] * investment_returns_df['sold_quantity'])
+    )
+
+    # Unrealized gains
+    investment_returns_df['unrealized_gains'] = (
+        investment_returns_df['current_holdings_value'] -
+        (investment_returns_df['avg_purchase_price'] * investment_returns_df['current_holdings'])
+    )
+
+    # --- RETURN CALCULATIONS ---
+
+    today = pd.Timestamp.today()
+
+    # Ensure date is Timestamp
+    investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
+
+    investment_returns_df['years_held'] = (
+        (today - investment_returns_df['first_purchase_date']).dt.days / 365.25
+    )
+    
+    # Total return (current value vs cost basis)
+    investment_returns_df['total_return_pct'] = (
+        ((investment_returns_df['current_price'] / investment_returns_df['avg_purchase_price']) - 1) * 100
+    )
+
+    # Years held
+    investment_returns_df['years_held'] = (
+        (today - investment_returns_df['first_purchase_date']).dt.days / 365.25
+    )
+
+    # Clean up infinite or invalid values
+    investment_returns_df = investment_returns_df.replace([np.inf, -np.inf], np.nan)
+
+    # --- ADD TOTALS ROW ---
+
+    # Compute totals for numeric columns
+    totals = investment_returns_df.select_dtypes(include=[np.number]).sum()
+    totals["company_and_ticker"] = "TOTAL"
+    totals["cik"] = ""
+
+    investment_returns_df = pd.concat(
+        [investment_returns_df, totals.to_frame().T],
+        ignore_index=True
+    )
+
+    # Compute portfolio-level total return
+    total_purchase_amount = investment_returns_df['purchase_amount'].sum()
+    total_sold_amount = investment_returns_df['sold_amount'].sum()
+    total_current_value = investment_returns_df['current_holdings_value'].sum()
+
+    portfolio_total_return = (
+        (total_sold_amount + total_current_value) / total_purchase_amount - 1
+    ) * 100
+
+    # Insert correct total return into totals row
+    investment_returns_df.loc[
+        investment_returns_df['company_and_ticker'] == "TOTAL",
+        'total_return_pct'
+    ] = portfolio_total_return
+
+    # Blank out invalid percent totals
+    # for col in percent_cols:
+    #     investment_returns_df.loc[
+    #         investment_returns_df["company_and_ticker"] == "TOTAL", col
+    #     ] = ""
+    
+    # Columns to remove
+    cols_to_remove = ["cik", "sold_quantity", "sold_amount", "avg_sold_price"]
+
+    # Drop them safely
+    investment_returns_df = investment_returns_df.drop(columns=cols_to_remove, errors="ignore")
+    
+    # --- STYLING ---
+
+    def color_gains(val):
+        """Green for gains, red for losses."""
+        try:
+            if pd.isna(val):
+                return ""
+            if val > 0:
+                return "color: green;"
+            if val < 0:
+                return "color: red;"
+        except:
+            pass
+        return ""
+
+    # Column groups
+    quantity_cols = ["purchase_quantity", "current_holdings"]
+    price_cols    = ["avg_purchase_price", "current_price"]
+    amount_cols   = ["purchase_amount", "current_holdings_value",
+                    "realized_gains", "unrealized_gains"]
+    percent_cols  = ["total_return_pct"]
+
+    # Format dictionary
+    fmt = {}
+
+    # Quantities → comma integers
+    for col in quantity_cols:
+        fmt[col] = lambda v: f"{v:,.0f}" if pd.notna(v) and isinstance(v, (int, float)) else v
+    
+    # Prices → $ with 2 decimals
+    for col in price_cols:
+        fmt[col] = lambda v: f"${v:,.2f}" if pd.notna(v) and isinstance(v, (int, float)) else v
+
+    # Amounts → $ with 0 decimals
+    for col in amount_cols:
+        fmt[col] = "${:,.0f}"
+
+    # Percent returns → 1 decimal place
+    for col in percent_cols:
+        fmt[col] = lambda v: f"{v:.1f}%" if pd.notna(v) and isinstance(v, (int, float)) else v
+            
+    fmt["first_purchase_date"] = lambda d: d.strftime("%Y-%m-%d") if pd.notna(d) else ""
+    
+    # --- SORT TOTALS TO TOP, THEN BY PURCHASE AMOUNT DESC ---
+
+    # Create a sort key: TOTAL row gets 0, others get 1
+    investment_returns_df["sort_key"] = (
+        investment_returns_df["company_and_ticker"].eq("TOTAL").map({True: 0, False: 1})
+    )
+
+    fields_to_blank = [
+        "years_held",
+        "avg_purchase_price",
+        "avg_sold_price",
+        "current_price",
+    ]
+
+    total_mask = investment_returns_df["company_and_ticker"] == "TOTAL"
+
+    for col in fields_to_blank:
+        if col in investment_returns_df.columns:
+            investment_returns_df.loc[total_mask, col] = ""
+
+
+    # Sort: TOTAL first, then by purchase_amount descending
+    investment_returns_df = (
+        investment_returns_df
+            .sort_values(["sort_key", "purchase_amount"], ascending=[True, False])
+            .reset_index(drop=True)
+    )
+
+    # Drop helper column
+    investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
+
+    styled_df = (
+        investment_returns_df.style
+            .applymap(color_gains, subset=[
+                "realized_gains",
+                "unrealized_gains",
+                "total_return_pct",
+            ])
+            .format(fmt)
+    )
+
+    st.write("These are the Investment Returns:")
+    st.dataframe(styled_df)                                         
+    st.write("")
+
+    st.write('These are the transactions to date:')
+    st.dataframe(transactions_df)
+
+    st.stop()
 
 # set page config and title
 st.set_page_config( page_title="Stock Screener", layout="wide" )
@@ -1715,14 +1956,16 @@ def main():
 # create & refine consolidated value score - completed 3/11/26
 # enable charts with/without outliers - completed 3/11/26
 
-    load_full_sec_btn = load_incremental_sec_btn = analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
+    load_full_sec_btn = load_incremental_sec_btn = investment_returns_btn = analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
 
     if ss.hide_menu==False:
         st.write("Choose an action:")
         with color_button("blue"):
             value_btn = st.button("View Stock Data, Update Categories, Enter Stock Transactions",key='view_data_btn')
         with color_button("blue"):
-            load_incremental_sec_btn = st.button("Load Incremental Financial Data from SEC (All Companies) - TBD")
+            load_incremental_sec_btn = st.button("Load Incremental Financial Data from SEC (All Companies)")
+        with color_button("green"):
+            investment_returns_btn = st.button("Show Investment Returns - TBD")
         with color_button("red"):
             load_full_sec_btn = st.button("Load Full Historical Financial Data from SEC (All Companies) - takes 2+ hours")
         with color_button("red"):
@@ -1734,15 +1977,17 @@ def main():
         with color_button('gray'):
             return_menu_btn=st.button('Return to Menu')
 
-    if return_menu_btn:
-        ss.hide_menu=False
-        ss.value_btn=False
+    def reset_forms_ss_vars():
+        ss.hide_menu=ss.value_btn=ss.show_transaction_form=ss.investment_returns=False
         ss.selected_company=None
-        ss.show_transaction_form=False
+        return
+        
+    if return_menu_btn:
+        reset_forms_ss_vars()
         st.rerun()
 
     if value_btn:
-        ss.analysis_btn=False
+        reset_forms_ss_vars()
         ss.value_btn=True
         ss.hide_menu=True
         st.rerun()
@@ -1781,6 +2026,15 @@ def main():
         write_sec_data_into_db('full')
         ss.analysis_btn=True
         st.rerun()
+        
+    if investment_returns_btn:
+        reset_forms_ss_vars()
+        ss.investment_returns=True
+        ss.hide_menu=True
+        st.rerun()
+    
+    if  ss.investment_returns==True:
+        show_investment_returns()
 
     if analysis_btn or ss.analysis_btn==True:
         ss.value_btn=False
