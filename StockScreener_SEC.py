@@ -31,28 +31,30 @@ if "quarterly_financials" not in ss:
     ss.styled_editable_stock_growth_analysis_df = pd.DataFrame()
     ss.company_lookup_df = pd.DataFrame()
     ss.transactions_table = pd.DataFrame()
+    ss.rankings_df = pd.DataFrame()
+    ss.filtered_df = pd.DataFrame()
     ss.metrics={}
-    ss.value_btn=False
-    ss.analysis_btn=False
+    ss.view_stock_analysis_form=False
+    ss.qtr_data_form=False
+    ss.process_yahoo_and_statistics=False
     ss.selected_company=None
     ss.hide_menu=False
     ss.show_transaction_form=False
-    ss.investment_returns=False
-    
-if "filters" not in ss:
-    ss.filters = {
-        "category": ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income'],
-        "max_revenue_median": 0,
-        "max_trailing_pe": 0,
-        "max_trailing_ps": 0,
-        "min_revenue_r2": 0.0,
-        "min_revenue_growth": 0,
-        "min_income_growth": 0,
-        "min_last3_income_positive": 0,
-        "min_revenue_n_count": 10,
-        "max_rev_outlier_pct": 0,
-        "min_last_filing_date": (datetime.today() - timedelta(days=365)).date()
-    }    
+    ss.investment_returns_form=False
+    ss.rerun_the_application=False
+    ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
+    ss.filter_min_revenue_growth=0
+    ss.filter_max_revenue_median=0
+    ss.filter_min_revenue_n_count=10
+    ss.filter_max_trailing_pe = 0
+    ss.filter_max_trailing_ps = 0
+    ss.filter_min_revenue_r2 = 0.0
+    ss.filter_min_revenue_growth = 0
+    ss.filter_min_income_growth = 0
+    ss.filter_min_last3_income_positive = 0
+    ss.filter_max_rev_outlier_pct = 0
+    ss.filter_min_last_filing_date = (datetime.today() - timedelta(days=365)).date()
+        
 def safe_round(x, n=1):
     return round(x, n) if isinstance(x, (int, float)) else None
 
@@ -223,8 +225,14 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin, re
     std = np.std(y_clean)
 
     # 7. Count outliers
+    # st.write(y) #debug
+
+    num_nulls = sum(
+        (v is None) or (isinstance(v, float) and math.isnan(v))
+        for v in y
+    )
     n = len(y)
-    n_outliers = n - len(y_clean)
+    n_outliers = n - len(y_clean)-num_nulls
     
     # debug_rows = []
     # for i, v in enumerate(y):
@@ -525,7 +533,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             metrics['revenue_avg_residual_last3'] = avg_residual_last3
         except Exception as e:
             slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue = 0, 0, 0, 0, 0, 0, 0, 0, None
-            st.write(f"Regression failed for Revenue on company {name} due to {e}")  # debug
+            st.write(f"Regression failed for Revenue on company {name} due to {e}")
             
    
     if metrics['income_growth_list']:
@@ -558,7 +566,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             metrics['income_avg_residual_last3'] = avg_residual_last3
         except Exception as e:
             slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income = 0, 0, 0, 0, 0, 0, 0, 0, None
-            st.write(f"Regression failed for Income for company {name} due to {e}")  # debug
+            st.write(f"Regression failed for Income for company {name} due to {e}")
         
     if metrics['margin_growth_list']:
         margin_growths = metrics['margin_growth_list']
@@ -585,7 +593,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             
         except Exception as e:
             slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin = 0, 0, 0, 0, 0, 0, 0, 0, None
-            st.write(f"Regression failed for Margin for company {name} due to {e}")  # debug
+            st.write(f"Regression failed for Margin for company {name} due to {e}")
     
     # Calculate average margin and last 3 quarters average margin
     if metrics['margin_values']:
@@ -883,14 +891,13 @@ def rank_companies_by_growth_and_update_DB(cik_list):
     # results_df for all companies being processed
     if isinstance(results, list) and len(results) > 0:
         results_df = pd.DataFrame(results)
-        st.dataframe(results_df)  # debug
         results_df = results_df.sort_values('Consolidated_Score', ascending=False)
     else:
         results_df=pd.DataFrame()
     # st.write(results) #debug
     # st.stop()
     
-    return results_df, results
+    return results_df
 
 def get_column_specs_results_df():
     column_specs= {
@@ -1128,7 +1135,7 @@ def write_sec_data_into_db(load_type):
     
     # Now go get the rest of the data for thesee companies and run regressions, and update the stock_growth_analysis_results
     ss.results_df = rank_companies_by_growth_and_update_DB(cik_list)
-    st.write(ss.results_df)
+    # st.write(ss.results_df) # debug?
     return
 
 def load_quarterly_sec_data_from_db():
@@ -1215,7 +1222,7 @@ def postgres_delete_single_transaction(row):
     conn.close()
 
 def enter_stock_transaction():
-    ss.show_transaction_form=True
+    # ss.show_transaction_form=True
 
     go_back_to_summary_btn = st.button('Go Back To Stock Analysis Summary')
     if go_back_to_summary_btn:
@@ -1360,7 +1367,47 @@ def quantile_color(s):
 
     return s.apply(color)
 
-def display_analysis_summary(stock_growth_analysis_df):
+def show_regression_charts(cik):
+    try: 
+        quarterly_df=postgres_read('stock_quarterly_financials_sec',f"cik='{cik}'")
+        company_and_ticker=quarterly_df['company_and_ticker'].iloc[0]
+        column_specs = get_column_specs_quarterly_df()
+        pg_to_pretty = {spec["pg_name"]: pretty for pretty, spec in column_specs.items()}
+        quarterly_df = quarterly_df.rename(columns=pg_to_pretty)
+        # st.dataframe(quarterly_df) # debug
+        analyze_yoy_growth(quarterly_df,company_and_ticker,plot_regression_bin=1)
+        # st.write(ss.rankings_df) #debug
+        company_description=ss.rankings_df.loc[ss.rankings_df['cik']==cik,'company_desc'].iloc[0]
+        st.write('')
+        st.write(f":blue[{company_description}]")
+    except Exception as e:
+        exc_type, exc_obj, tb = sys.exc_info()
+        filename = tb.tb_frame.f_code.co_filename
+        line_no = tb.tb_lineno
+        code_line = linecache.getline(filename, line_no).strip()
+        st.warning(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
+        # st.warning(f"Regression failed: {e}")
+    return()
+
+def reset_forms_ss_vars():
+    ss.hide_menu=ss.view_stock_analysis_form=ss.show_transaction_form=ss.qtr_data_form=ss.investment_returns_form=False
+    ss.selected_company=None
+    return
+
+def update_primary_filter_session_value(key):
+    temp_key = 'temp_'+key
+    ss[key] = ss[temp_key]
+
+def display_stock_analysis_form(stock_growth_analysis_df):
+    with color_button('green'):
+        enter_transaction_btn = st.button('Enter Stock Buy/Sell Transaction')
+    if enter_transaction_btn:
+        ss.show_transaction_form=True
+        st.rerun()
+
+    if ss.rerun_the_application==True:
+        ss.rerun_the_application=False
+        st.rerun()
         
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
@@ -1375,8 +1422,7 @@ def display_analysis_summary(stock_growth_analysis_df):
         ]
 
     st.write("**Stock Growth Analysis Data:**")
-
-    if ss.editable_stock_growth_analysis_df.empty:
+    if ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty:
         column_specs=get_column_specs_results_df()
         rename_map = {
             spec["pg_name"]: pretty
@@ -1463,98 +1509,65 @@ def display_analysis_summary(stock_growth_analysis_df):
     
     # categories = ss.editable_stock_growth_analysis_df['category'].unique().tolist()
     ss.categories_list = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income','Inconsistent Growth', 'Declining Growth', 'Other', 'Uncategorized']
-    # ss.filters['max_revenue_median'] = int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1)    
     
-    show_filters = st.toggle("Show Filters", value=True)
+    company_options = [None] + ss.rankings_df["company_and_ticker"].tolist()
     
-    def normalize_date_for_widget(value):
-        # None → default date
-        if value is None:
-            return datetime.date(2000, 1, 1)
-
-        # pandas Timestamp → convert to date
-        if isinstance(value, pd.Timestamp):
-            return value.date()
-
-        # datetime.datetime → convert to date
-        if isinstance(value, datetime.datetime):
-            return value.date()
-
-        # datetime.date → already good
-        if isinstance(value, datetime.date):
-            return value
-
-        # int or string → try to parse
-        try:
-            return pd.to_datetime(value).date()
-        except Exception:
-            return datetime.date(2000, 1, 1)
-
-    if show_filters:    
+    with st.expander("Expand to show filters", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
-            ss.filters['category'] = st.multiselect('Which categories to include?', options=ss.categories_list, default=ss.filters['category'])
-            ss.filters['max_revenue_median'] = st.number_input("Max Revenue Median?", value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), min_value=0, max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), step=1000000, format="%d")
-            ss.filters['max_trailing_pe'] = st.number_input("Max trailing PE (0 = No Filter)?", value=ss.filters['max_trailing_pe'], min_value=0, max_value=300, step=10, format="%d")
-            ss.filters['max_trailing_ps'] = st.number_input("Max trailing PS (0 = No Filter)?", value=ss.filters['max_trailing_ps'], min_value=0, max_value=300, step=10, format="%d")
-            ss.filters['min_revenue_r2'] = st.number_input("Min Revenue R2 (0 = No Filter)?", value=ss.filters['min_revenue_r2'], min_value=0.00, max_value=1.00, step=0.10, format="%.2f")
-
-            # ss.filters['category'] = st.multiselect('Which categories to include?',options=ss.categories_list,default=ss.filters['category'])
-            # ss.filters['max_revenue_median'] = st.number_input("Max Revenue Median?",value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1),min_value=0,max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1),step=1000000, format="%d")
-            # ss.filters['max_trailing_pe'] =  st.number_input("Max trailing PE (0 = No Filter)?",value=ss.filters['max_trailing_pe'],min_value=0,max_value=300,step=10, format="%d")
-            # ss.filters['max_trailing_ps'] =  st.number_input("Max trailing PS (0 = No Filter)?",value=ss.filters['max_trailing_ps'],min_value=0,max_value=300,step=10, format="%d")
-            # ss.filters['min_revenue_r2'] = st.number_input("Min Revenue R2 (0 = No Filter)?",value=ss.filters['min_revenue_r2'],min_value=0.00,max_value=1.00,step=0.10, format="%.2f")
-
+            company_and_ticker=st.selectbox("Search for specific company (negates other filters, set to 'None' to clear):",options=company_options,index=0)
+            category = st.multiselect('Which categories to include?', options=ss.categories_list,key='temp_filter_category', default=ss.filter_category, on_change=update_primary_filter_session_value, args=("filter_category",)) #default=ss.filters['category'],on_change=lambda: on_filter_change("category", ss.category)
+            max_revenue_median = st.number_input("Max Revenue Median? (0 = No Filter)", value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), min_value=0, step=1000000, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",)) # max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1, on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
+            max_trailing_pe = st.number_input("Max trailing PE (0 = No Filter)?", key='filter_max_trailing_pe', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_pe",))
+            max_trailing_ps = st.number_input("Max trailing PS (0 = No Filter)?", key='filter_max_trailing_ps', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_ps",))
         with col2:
+            min_last_filing_date = st.date_input("Min Last Filing Date?",key='filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
+            min_revenue_growth = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",key="temp_filter_min_revenue_growth", min_value=0, max_value=100, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
+            min_income_growth = st.number_input("Min Quarterly Income Growth % (0 = No filter)?", key='temp_filter_min_income_growth', min_value=0, max_value=10, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_income_growth",))
+            min_revenue_r2 = st.number_input("Min Revenue R2 (0 = No Filter)?", key='temp_filter_min_revenue_r2', min_value=0.00, max_value=1.00, step=0.10, format="%.2f", on_change=update_primary_filter_session_value, args=("filter_min_revenue_r2",))
+            min_revenue_n_count = st.number_input("Min revenue N count?", key='temp_filter_min_revenue_n_count', min_value=0, max_value=ss.filter_min_revenue_n_count, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_n_count",))
+            max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?", min_value=0, max_value=100, step=5, format="%d", on_change=update_primary_filter_session_value, args=("filter_rev_outlier_pct",))
 
-            ss.filters['min_last_filing_date'] = st.date_input("Min Last Filing Date?",value=ss.filters['min_last_filing_date'],key="min_last_filing_date")
-            ss.filters['min_revenue_growth'] = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)", value=ss.filters['min_revenue_growth'], min_value=0, max_value=100, step=1, format="%d")
-            ss.filters['min_income_growth'] = st.number_input("Min Quarterly Income Growth % (0 = No filter)?", value=ss.filters['min_income_growth'], min_value=0, max_value=10, step=1, format="%d")
-            ss.filters['min_revenue_n_count'] = st.number_input("Min revenue N count?", value=ss.filters['min_revenue_n_count'], min_value=0, max_value=ss.filters['min_revenue_n_count'], step=10, format="%d")
-            ss.filters['max_rev_outlier_pct'] = st.number_input("Max Revenue Outlier % (0 = No filter)?", value=ss.filters['max_rev_outlier_pct'], min_value=0, max_value=100, step=5, format="%d")
-            
-            # ss.filters['min_last_filing_date'] = st.date_input("Min Last Filing Date?",key='min_last_filing_date')
-            # ss.filters['min_revenue_growth'] = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",value=ss.filters['min_revenue_growth'],min_value=0,max_value=100,step=1, format="%d")
-            # ss.filters['min_income_growth'] = st.number_input("Min Quarterly Income Growth % (0 = No filter)?",value=ss.filters['min_income_growth'],min_value=0,max_value=10,step=1, format="%d")
-            # # ss.filters['min_last3_income_positive'] = st.number_input("Min Last 3 Positive Income Qtrs (0 to 3)?",value=ss.filters['min_last3_income_positive'],min_value=0,max_value=3,step=1, format="%d")
-            # ss.filters['min_revenue_n_count'] = st.number_input("Min revenue N count?",value=10,min_value=0,max_value=ss.filters['min_revenue_n_count'],step=10, format="%d")
-            # ss.filters['max_rev_outlier_pct'] = st.number_input("Max Revenue Outlier % (0 = No filter)?",value=ss.filters['max_rev_outlier_pct'],min_value=0,max_value=100,step=5, format="%d")
+    if company_and_ticker != None:
+        # st.write(company_and_ticker) #debug
+        selected_cik = ss.rankings_df.loc[ss.rankings_df['company_and_ticker'] == company_and_ticker, "cik"].iloc[0]
+        mask = ss.editable_stock_growth_analysis_df['cik'] == selected_cik
+        ss.selected_company=selected_cik
+    else:
+        mask = ss.editable_stock_growth_analysis_df['Revenue_Growth_N'] >= ss.filter_min_revenue_n_count
 
-    filters = ss.filters
-    
-    mask = (
-        (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] < filters['max_revenue_median'])
-        & (ss.editable_stock_growth_analysis_df['Revenue_Growth_N'] >= filters['min_revenue_n_count'])
-        # & (ss.editable_stock_growth_analysis_df['Last3Q_Income_Positive'] >= filters['min_last3_income_positive'])
-    )
+        mask_categories = ["" if c == "Uncategorized" else c for c in ss.filter_category]
+        mask &= (ss.editable_stock_growth_analysis_df['category'].isin(mask_categories))
 
-    mask_categories = ["" if c == "Uncategorized" else c for c in filters['category']]
-    mask &= (ss.editable_stock_growth_analysis_df['category'].isin(mask_categories))
-    
-    if filters['min_revenue_growth'] != 0:
-        mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_PCT'] >= filters['min_revenue_growth'])
-    
-    if filters['min_income_growth'] != 0:
-        mask &= (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= filters['min_income_growth'])
+        if ss.filter_max_revenue_median != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'] < ss.filter_max_revenue_median)
+        
+        if ss.filter_min_revenue_growth != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_PCT'] >= ss.filter_min_revenue_growth)
+        
+        if ss.filter_min_income_growth != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= ss.filter_min_income_growth)
 
-    if filters['min_revenue_r2'] != 0:
-        mask &= (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= filters['min_revenue_r2'])
+        if ss.filter_min_revenue_r2 != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= ss.filter_min_revenue_r2)
 
-    if filters['max_rev_outlier_pct'] != 0:
-        mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_Outlier_PCT'] <=  filters['max_rev_outlier_pct'])
-    
-    if filters['max_trailing_pe'] != 0:
-        mask &= (ss.editable_stock_growth_analysis_df['trailing_pe'] <= filters['max_trailing_pe'])
-    
-    if filters['max_trailing_ps'] != 0:
-        mask &= (ss.editable_stock_growth_analysis_df['trailing_ps'] <= filters['max_trailing_ps'])
-    
-    if filters['min_last_filing_date'] != None:
-        ss.editable_stock_growth_analysis_df['max_filing_date'] = pd.to_datetime(
-                ss.editable_stock_growth_analysis_df['max_filing_date'],
-                errors='coerce'
-            )
-        mask &= (ss.editable_stock_growth_analysis_df['max_filing_date'] >= pd.to_datetime(filters['min_last_filing_date']))
+        if max_rev_outlier_pct != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_Outlier_PCT'] <=  max_rev_outlier_pct)
+        
+        if ss.filter_max_trailing_pe != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['trailing_pe'] <= ss.filter_max_trailing_pe)
+        
+        if ss.filter_max_trailing_ps != 0:
+            mask &= (ss.editable_stock_growth_analysis_df['trailing_ps'] <= ss.filter_max_trailing_ps)
+        
+        if ss.filter_min_last_filing_date != None:
+            ss.editable_stock_growth_analysis_df['max_filing_date'] = pd.to_datetime(
+                    ss.editable_stock_growth_analysis_df['max_filing_date'],
+                    errors='coerce')
+            selected_date = ss.filter_min_last_filing_date
+            if isinstance(selected_date, (list, tuple)):
+                selected_date = selected_date[0] if len(selected_date) > 0 else None
+            mask &= (ss.editable_stock_growth_analysis_df['max_filing_date'] >= pd.to_datetime(ss.filter_min_last_filing_date))
         
     ss.filtered_df = ss.editable_stock_growth_analysis_df[mask]
     st.write(f"Current filters selecting {len(ss.filtered_df)} companies")
@@ -1564,11 +1577,6 @@ def display_analysis_summary(stock_growth_analysis_df):
     with color_button('red'):
         update_yahoo_and_stats_btn = st.button('Hit this button to update Yahoo Stock Data for CURRENTLY SELECTED Stocks (only when stock price needs updating or selection widens)')
 
-    # ss.df=filtered_df.copy()        
-    styled = build_styler(ss.filtered_df)
-
-    # st.write("styled df:",styled) #debug
-
     if update_yahoo_and_stats_btn:
         cik_list = ss.filtered_df['cik'].tolist()
         results_df = rank_companies_by_growth_and_update_DB(cik_list)
@@ -1576,9 +1584,14 @@ def display_analysis_summary(stock_growth_analysis_df):
             postgres_update(results_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
             ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.iloc[0:0]
             st.toast('Updated stock_growth_analysis_results on DB')
-            # st.stop()
+        ss.view_stock_analysis_form=True
         st.rerun()
-    
+
+    # ss.df=filtered_df.copy()        
+    styled = build_styler(ss.filtered_df)
+
+    # st.write("styled df:",styled) #debug
+
     def on_change_handle():
         if "my_editor" not in ss:
             return
@@ -1610,11 +1623,14 @@ def display_analysis_summary(stock_growth_analysis_df):
         # st.write(new_changes) #debug
         
         ss.prev_edits = edited
+        
         # Process checkbox clicks even if "data" is missing
         for row_index, changes in new_changes.items():
             cik = df.loc[row_index, "cik"]
             if changes.get("chart") is True:
                 ss.selected_company = cik
+                ss.rerun_the_application=True
+                
             if "category" in changes or "notes" in changes:
                 update_df = ss.filtered_df.loc[[row_index], ['cik','ticker','company_and_ticker','category','notes','stock_price','trailing_pe','trailing_ps']]
                 new_category = changes.get("category", df.loc[row_index,"category"])
@@ -1627,7 +1643,6 @@ def display_analysis_summary(stock_growth_analysis_df):
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
-        # st.write(edited)
         
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 ,hide_index=True
@@ -1674,28 +1689,15 @@ def display_analysis_summary(stock_growth_analysis_df):
                 )
            
     if ss.selected_company is not None:
-        try: 
-            cik = ss.selected_company
-            quarterly_df=postgres_read('stock_quarterly_financials_sec',f"cik='{cik}'")
-            company_and_ticker=quarterly_df['company_and_ticker'].iloc[0]
-            column_specs = get_column_specs_quarterly_df()
-            pg_to_pretty = {spec["pg_name"]: pretty for pretty, spec in column_specs.items()}
-            quarterly_df = quarterly_df.rename(columns=pg_to_pretty)
-            # st.dataframe(quarterly_df) # debug
-            analyze_yoy_growth(quarterly_df,company_and_ticker,plot_regression_bin=1)
-            # st.write(ss.rankings_df) #debug
-            company_description=ss.rankings_df.loc[ss.rankings_df['cik']==cik,'company_desc'].iloc[0]
-            st.write('')
-            st.write(f":blue[{company_description}]")
-        except Exception as e:
-            exc_type, exc_obj, tb = sys.exc_info()
-            filename = tb.tb_frame.f_code.co_filename
-            line_no = tb.tb_lineno
-            code_line = linecache.getline(filename, line_no).strip()
-            st.warning(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
-            # st.warning(f"Regression failed: {e}")
+        cik = ss.selected_company
+        # display_stock_analysis_form()
+        show_regression_charts(cik)
 
-    return
+    with color_button('gray'):
+        return_menu2_btn=st.button('Return to Menu ')
+    if return_menu2_btn:
+        reset_forms_ss_vars()
+        st.rerun()
 
 def show_investment_returns():
     transactions_df=load_stock_transactions_from_db()
@@ -1768,16 +1770,15 @@ def show_investment_returns():
     )
 
     # Realized gains (simple average-cost method)
-    investment_returns_df['realized_gains'] = (
-        investment_returns_df['sold_amount'] -
-        (investment_returns_df['avg_purchase_price'] * investment_returns_df['sold_quantity'])
-    )
+    investment_returns_df['realized_gains'] = investment_returns_df['sold_amount'] - (investment_returns_df['avg_purchase_price'] * investment_returns_df['sold_quantity'])
 
     # Unrealized gains
     investment_returns_df['unrealized_gains'] = (
         investment_returns_df['current_holdings_value'] -
         (investment_returns_df['avg_purchase_price'] * investment_returns_df['current_holdings'])
     )
+    
+    investment_returns_df['total_gains']=investment_returns_df['realized_gains']+investment_returns_df['unrealized_gains']
 
     # --- RETURN CALCULATIONS ---
 
@@ -1786,20 +1787,13 @@ def show_investment_returns():
     # Ensure date is Timestamp
     investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
 
-    investment_returns_df['years_held'] = (
-        (today - investment_returns_df['first_purchase_date']).dt.days / 365.25
+    investment_returns_df['months_held'] = (
+        round((today - investment_returns_df['first_purchase_date']).dt.days / 30,1)
     )
     
     # Total return (current value vs cost basis)
-    investment_returns_df['total_return_pct'] = (
-        ((investment_returns_df['current_price'] / investment_returns_df['avg_purchase_price']) - 1) * 100
-    )
-
-    # Years held
-    investment_returns_df['years_held'] = (
-        (today - investment_returns_df['first_purchase_date']).dt.days / 365.25
-    )
-
+    investment_returns_df['total_return_pct'] = (investment_returns_df['total_gains']/investment_returns_df['purchase_amount']) * 100
+    
     # Clean up infinite or invalid values
     investment_returns_df = investment_returns_df.replace([np.inf, -np.inf], np.nan)
 
@@ -1820,26 +1814,16 @@ def show_investment_returns():
     total_sold_amount = investment_returns_df['sold_amount'].sum()
     total_current_value = investment_returns_df['current_holdings_value'].sum()
 
-    portfolio_total_return = (
-        (total_sold_amount + total_current_value) / total_purchase_amount - 1
-    ) * 100
+    portfolio_total_return = ((total_sold_amount + total_current_value) / total_purchase_amount - 1) * 100
 
     # Insert correct total return into totals row
     investment_returns_df.loc[
         investment_returns_df['company_and_ticker'] == "TOTAL",
         'total_return_pct'
     ] = portfolio_total_return
-
-    # Blank out invalid percent totals
-    # for col in percent_cols:
-    #     investment_returns_df.loc[
-    #         investment_returns_df["company_and_ticker"] == "TOTAL", col
-    #     ] = ""
     
     # Columns to remove
     cols_to_remove = ["cik", "sold_quantity", "sold_amount", "avg_sold_price"]
-
-    # Drop them safely
     investment_returns_df = investment_returns_df.drop(columns=cols_to_remove, errors="ignore")
     
     # --- STYLING ---
@@ -1860,8 +1844,7 @@ def show_investment_returns():
     # Column groups
     quantity_cols = ["purchase_quantity", "current_holdings"]
     price_cols    = ["avg_purchase_price", "current_price"]
-    amount_cols   = ["purchase_amount", "current_holdings_value",
-                    "realized_gains", "unrealized_gains"]
+    amount_cols   = ["purchase_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
     percent_cols  = ["total_return_pct"]
 
     # Format dictionary
@@ -1870,6 +1853,9 @@ def show_investment_returns():
     # Quantities → comma integers
     for col in quantity_cols:
         fmt[col] = lambda v: f"{v:,.0f}" if pd.notna(v) and isinstance(v, (int, float)) else v
+
+    # months_held to single decimal
+    fmt['months_held'] = lambda v: f"{v:,.1f}" if pd.notna(v) and isinstance(v, (int, float)) else v
     
     # Prices → $ with 2 decimals
     for col in price_cols:
@@ -1892,16 +1878,24 @@ def show_investment_returns():
         investment_returns_df["company_and_ticker"].eq("TOTAL").map({True: 0, False: 1})
     )
 
-    fields_to_blank = [
-        "years_held",
-        "avg_purchase_price",
-        "avg_sold_price",
-        "current_price",
-    ]
-
     total_mask = investment_returns_df["company_and_ticker"] == "TOTAL"
 
-    for col in fields_to_blank:
+    fields_to_blank_totals = ["months_held","avg_purchase_price","avg_sold_price","current_price","purchase_quantity"
+                              ,"sold_quantity","current_holdings"]
+
+    def highlight_total_row(row):
+        if row["company_and_ticker"] == "TOTAL":
+            return ["background-color: #f2f2f2"] * len(row)
+        return [""] * len(row)
+
+    styled_df = (
+        investment_returns_df
+            .style
+            .apply(highlight_total_row, axis=1)
+            # your existing formatting here...
+    )
+
+    for col in fields_to_blank_totals:
         if col in investment_returns_df.columns:
             investment_returns_df.loc[total_mask, col] = ""
 
@@ -1915,20 +1909,24 @@ def show_investment_returns():
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
+    investment_returns_df = investment_returns_df[['company_and_ticker','purchase_amount','current_holdings_value','total_gains','total_return_pct','realized_gains','unrealized_gains','months_held','purchase_quantity','first_purchase_date','avg_purchase_price','current_holdings','current_price']]
 
     styled_df = (
         investment_returns_df.style
-            .applymap(color_gains, subset=[
-                "realized_gains",
-                "unrealized_gains",
-                "total_return_pct",
-            ])
+            .applymap(color_gains, subset=['total_gains',"realized_gains","unrealized_gains","total_return_pct"])
             .format(fmt)
     )
 
     st.write("These are the Investment Returns:")
-    st.dataframe(styled_df)                                         
+    st.dataframe(styled_df,
+                # column_order={'total_return'}, 
+                column_config={
+                     "company_and_ticker":st.column_config.Column("company_and_ticker",pinned=True)
+                 },
+                 )
     st.write("")
+
+
 
     st.write('These are the transactions to date:')
     st.dataframe(transactions_df)
@@ -1956,12 +1954,12 @@ def main():
 # create & refine consolidated value score - completed 3/11/26
 # enable charts with/without outliers - completed 3/11/26
 
-    load_full_sec_btn = load_incremental_sec_btn = investment_returns_btn = analysis_btn = value_btn = qtr_data_btn = return_menu_btn = False
+    load_full_sec_btn = load_incremental_sec_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = False
 
     if ss.hide_menu==False:
         st.write("Choose an action:")
         with color_button("blue"):
-            value_btn = st.button("View Stock Data, Update Categories, Enter Stock Transactions",key='view_data_btn')
+            view_stock_analysis_form_btn = st.button("View Stock Data, Update Categories, Enter Stock Transactions",key='view_data_btn')
         with color_button("blue"):
             load_incremental_sec_btn = st.button("Load Incremental Financial Data from SEC (All Companies)")
         with color_button("green"):
@@ -1969,76 +1967,66 @@ def main():
         with color_button("red"):
             load_full_sec_btn = st.button("Load Full Historical Financial Data from SEC (All Companies) - takes 2+ hours")
         with color_button("red"):
-            analysis_btn = st.button("Get Yahoo Stock Data and Run Statistical Analysis (All Companies) - takes 30 mins")
+            process_yahoo_and_stats_btn = st.button("Get Yahoo Stock Data and Run Statistical Analysis (All Companies) - takes 30 mins")
         with color_button("red"):
             qtr_data_btn = st.button("Show Quarterly Financial Data")
 
     else:
         with color_button('gray'):
             return_menu_btn=st.button('Return to Menu')
-
-    def reset_forms_ss_vars():
-        ss.hide_menu=ss.value_btn=ss.show_transaction_form=ss.investment_returns=False
-        ss.selected_company=None
-        return
         
+    # For the menu button click, change the session state form and rerun
     if return_menu_btn:
         reset_forms_ss_vars()
         st.rerun()
 
-    if value_btn:
+    if view_stock_analysis_form_btn:
         reset_forms_ss_vars()
-        ss.value_btn=True
+        ss.view_stock_analysis_form=True
         ss.hide_menu=True
         st.rerun()
         
-    if ss.value_btn==True:
-        if ss.show_transaction_form==False:
-            with color_button('green'):
-                enter_transaction_btn = st.button('Enter Stock Buy/Sell Transaction')
-            if enter_transaction_btn:
-                ss.show_transaction_form=True
-                st.rerun()
-            
-        if ss.show_transaction_form==True:
-            enter_stock_transaction()
-       
-        if ss.show_transaction_form==False:
-            stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
-            display_analysis_summary(stock_growth_analysis_df)
-            with color_button('gray'):
-                return_menu2_btn=st.button('Return to Menu ')
-            if return_menu2_btn:
-                ss.hide_menu=False
-                ss.value_btn=False
-                ss.selected_company=None
-                ss.show_transaction_form=False
-                st.rerun()
-
     if load_incremental_sec_btn:
-        ss.analysis_btn=ss.value_btn=ss.show_transaction_form=False
+        reset_forms_ss_vars()
         write_sec_data_into_db('incremental')
-        ss.analysis_btn=True
+        ss.view_stock_analysis_form=True
+        ss.hide_menu=True
         st.rerun()
 
     if load_full_sec_btn:
-        ss.analysis_btn=ss.value_btn=ss.show_transaction_form=False
+        reset_forms_ss_vars()
         write_sec_data_into_db('full')
-        ss.analysis_btn=True
+        ss.view_stock_analysis_form=True
+        ss.hide_menu=True
         st.rerun()
         
     if investment_returns_btn:
         reset_forms_ss_vars()
-        ss.investment_returns=True
+        ss.investment_returns_form=True
         ss.hide_menu=True
         st.rerun()
     
-    if  ss.investment_returns==True:
+    if process_yahoo_and_stats_btn:
+        reset_forms_ss_vars()
+        ss.process_yahoo_and_statistics=True
+        st.rerun()
+
+    if qtr_data_btn:
+        ss.qtr_data_form=True
+        st.rerun()
+    
+    # This is the actual logic run by the menu buttons
+    if ss.view_stock_analysis_form==True:
+        if ss.show_transaction_form==False:
+            stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
+            display_stock_analysis_form(stock_growth_analysis_df)
+        else:
+            enter_stock_transaction()
+        
+    if ss.investment_returns_form==True:
         show_investment_returns()
 
-    if analysis_btn or ss.analysis_btn==True:
-        ss.value_btn=False
-        ss.analysis_btn=True
+    if ss.process_yahoo_and_statistics==True:
         # column_specs=get_column_specs()
         with st.spinner(f"Loadiing SEC Data"):
             ss.quarterly_financials = load_quarterly_sec_data_from_db()
@@ -2063,14 +2051,15 @@ def main():
                 st.write('Collected data from Yahoo and Processed & Saved Regression Analysis')
                 # with st.spinner("Loading Analysis Summary from DB"):
                 #     stock_growth_analysis_df=load_stock_growth_analysis_data_from_db()
-                # display_analysis_summary(stock_growth_analysis_df)
+                # display_stock_analysis_form(stock_growth_analysis_df)
         
         with st.spinner("Loading Analysis Summary from DB"):
             stock_growth_analysis_df=load_stock_growth_analysis_data_from_db()
         ss.hide_menu=True
-        display_analysis_summary(stock_growth_analysis_df)
+        ss.view_stock_analysis_form=True
+        st.rerun()
 
-    if qtr_data_btn:
+    if ss.qtr_data_form:
         quarterly_df = load_quarterly_sec_data_from_db()
         st.dataframe(quarterly_df)
                     
