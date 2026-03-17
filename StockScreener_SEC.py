@@ -1375,6 +1375,7 @@ def show_regression_charts(cik):
     try: 
         quarterly_df=postgres_read('stock_quarterly_financials_sec',f"cik='{cik}'")
         company_and_ticker=quarterly_df['company_and_ticker'].iloc[0]
+        ticker=quarterly_df['ticker'].iloc[0]
         column_specs = get_column_specs_quarterly_df()
         pg_to_pretty = {spec["pg_name"]: pretty for pretty, spec in column_specs.items()}
         quarterly_df = quarterly_df.rename(columns=pg_to_pretty)
@@ -1384,6 +1385,8 @@ def show_regression_charts(cik):
         company_description=ss.rankings_df.loc[ss.rankings_df['cik']==cik,'company_desc'].iloc[0]
         st.write('')
         st.write(f":blue[{company_description}]")
+        url = f"https://finance.yahoo.com/quote/{ticker}/"
+        st.write("Click this for the Yahoo Finance Page (%s)" % url)
     except Exception as e:
         exc_type, exc_obj, tb = sys.exc_info()
         filename = tb.tb_frame.f_code.co_filename
@@ -1882,12 +1885,13 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
-        
+
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 ,hide_index=True
                 ,column_config= {
                 'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
+                # "Yahoo_Link": st.column_config.LinkColumn(label="Links",display_text="https://finance.yahoo.com",display_text="Open Chart ↗"),
                 'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 'price_range_52wks': st.column_config.TextColumn(),
@@ -1926,11 +1930,21 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%.1f', width="small"),
                 },
                 )
+
+    # selection = ss.get("row_select", {})
+    # selected_rows = selection.get("rows", [])
+    # if selected_rows:
+    #     row_idx = selected_rows[0]
+    #     row = styled.iloc[row_idx]
+    #     cik = row["cik"]
+    #     ss.selected_company=cik
+    #     # name = row["company_and_ticker"]
            
     if ss.selected_company is not None:
         cik = ss.selected_company
         # display_stock_analysis_form()
         show_regression_charts(cik)
+
 
     with color_button('gray'):
         return_menu2_btn=st.button('Return to Menu ')
