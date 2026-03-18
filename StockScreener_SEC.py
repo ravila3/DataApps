@@ -103,7 +103,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     # st.write(plot_df) #debug
     # base = alt.Chart(plot_df).encode(x=alt.X("x_label:T",title=None))
     base = alt.Chart(plot_df).encode(
-        x=alt.X("x_label:T", title=None,axis=alt.Axis(grid=False)) #, axis=alt.Axis(grid=False)
+        x=alt.X("x_label:T", title=None,axis=alt.Axis(grid=False, tickCount="year")) #, axis=alt.Axis(grid=False)
         # y=alt.Y(f"{var_name}:Q") #, axis=alt.Axis(grid=False)
     )
     
