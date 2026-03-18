@@ -54,6 +54,8 @@ if "quarterly_financials" not in ss:
     ss.filter_min_last3_income_positive = 0
     ss.filter_max_rev_outlier_pct = 0
     ss.filter_min_last_filing_date = (datetime.today() - timedelta(days=365)).date()
+    ss.filter_industry = None
+    ss.filter_sector = None
         
 def safe_round(x, n=1):
     return round(x, n) if isinstance(x, (int, float)) else None
@@ -1661,7 +1663,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker'] + editable_columns + ['stock_price', 'price_range_52wks', 'pct_chg_from_52wk_high', 'pct_chg_from_52wk_low', 
+    columns = [ 'cik', 'ticker', 'company_and_ticker'] + editable_columns + ['industry','sector','stock_price', 'price_range_52wks', 'pct_chg_from_52wk_high', 'pct_chg_from_52wk_low', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
@@ -1761,6 +1763,12 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     
     company_options = [None] + ss.rankings_df["company_and_ticker"].tolist()
     
+    counts = ss.rankings_df['industry'].value_counts(dropna=True)
+    industry_list = [None] + counts.index.tolist()
+    
+    counts = ss.rankings_df['sector'].value_counts(dropna=True)
+    sector_list = [None] + counts.index.tolist()
+    
     with st.expander("Expand to show filters", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
@@ -1774,7 +1782,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             min_last_filing_date = st.date_input("Min Last Filing Date?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
             min_revenue_growth = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",key="temp_filter_min_revenue_growth", min_value=0, max_value=100, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
             min_income_growth = st.number_input("Min Quarterly Income Growth % (0 = No filter)?", key='temp_filter_min_income_growth', min_value=0, max_value=10, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_income_growth",))
-            min_revenue_r2 = st.number_input("Min Revenue R2 (0 = No Filter)?", key='temp_filter_min_revenue_r2', min_value=0.00, max_value=1.00, step=0.10, format="%.2f", on_change=update_primary_filter_session_value, args=("filter_min_revenue_r2",))
+            # min_revenue_r2 = st.number_input("Min Revenue R2 (0 = No Filter)?", key='temp_filter_min_revenue_r2', min_value=0.00, max_value=1.00, step=0.10, format="%.2f", on_change=update_primary_filter_session_value, args=("filter_min_revenue_r2",))
+            industry = st.selectbox("Select industry to include ('None' to clear selection)", key='temp_filter_industry',options=industry_list,index=0, on_change=update_primary_filter_session_value, args=("filter_industry",))
+            sector = st.selectbox("Select sector to include ('None' to clear selection)", key='temp_filter_sector',options=sector_list,index=0, on_change=update_primary_filter_session_value, args=("filter_sector",))
             # min_revenue_n_count = st.number_input("Min revenue N count?", key='temp_filter_min_revenue_n_count', min_value=0, max_value=ss.filter_min_revenue_n_count, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_n_count",))
             # max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?", min_value=0, max_value=100, step=5, format="%d", on_change=update_primary_filter_session_value, args=("filter_rev_outlier_pct",))
 
@@ -1798,8 +1808,16 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         if ss.filter_min_income_growth != 0:
             mask &= (ss.editable_stock_growth_analysis_df['Income_Growth_PCT'] >= ss.filter_min_income_growth)
 
-        if ss.filter_min_revenue_r2 != 0:
-            mask &= (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= ss.filter_min_revenue_r2)
+        if ss.filter_industry != None:
+            values = [ss.filter_industry]
+            mask &= (ss.editable_stock_growth_analysis_df['industry'].isin(values))
+
+        if ss.filter_sector != None:
+            values = [ss.filter_sector]
+            mask &= (ss.editable_stock_growth_analysis_df['sector'].isin(values))
+
+        # if ss.filter_min_revenue_r2 != 0:
+        #     mask &= (ss.editable_stock_growth_analysis_df['Revenue_R2'] >= ss.filter_min_revenue_r2)
 
         # if max_rev_outlier_pct != 0:
         #     mask &= (ss.editable_stock_growth_analysis_df['Revenue_Growth_Outlier_PCT'] <=  max_rev_outlier_pct)
