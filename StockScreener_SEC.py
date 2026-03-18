@@ -643,19 +643,23 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                     # revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
-                    centered_text(f"Quarterly Growth: {metrics['revenue_growth_pct']:,.1f}%, R²: {metrics['revenue_r2']:.2f}, Outlier: {metrics['revenue_outlier_pct']:.1f}%")
+                    annualized_growth = ((1+(metrics['revenue_growth_pct'])/100) **4 - 1)* 100 * np.sign(metrics['revenue_growth_pct'])
+                    # st.write(f"metrics['revenue_growth_pct']={metrics['revenue_growth_pct']}, annualized={annualized_growth}")
+                    centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['revenue_r2']:.2f}, Outlier: {metrics['revenue_outlier_pct']:.1f}%")
             if chart_income is not None:
                 with col2:
                     # income_slope_pct = (metrics['income_growth_slope'] / metrics['income_growth_median'] * 100) if metrics['income_growth_median'] != 0 else 0
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_income, width='stretch')
-                    centered_text(f"Quarterly Growth: {metrics['income_growth_pct']:,.1f}%, R²: {metrics['income_r2']:.2f}, Outlier: {metrics['income_outlier_pct']:.1f}%")
+                    annualized_growth = ((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100 * np.sign(metrics['income_growth_pct'])
+                    centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['income_r2']:.2f}, Outlier: {metrics['income_outlier_pct']:.1f}%")
             if chart_margin is not None:
                 with col3:
                     # margin_slope_pct = (metrics['margin_growth_slope'] / metrics['margin_growth_median'] * 100) if metrics['margin_growth_median'] != 0 else 0
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_margin, width='stretch')
-                    centered_text   (f"Quarterly Growth: {metrics['margin_growth_pct']:,.1f}%, R²: {metrics['margin_r2']:.2f}, Outlier: {metrics['margin_outlier_pct']:.1f}%")
+                    annualized_growth = ((1+(metrics['margin_growth_pct'])/100) **4 - 1)* 100 * np.sign(metrics['margin_growth_pct'])
+                    centered_text   (f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['margin_r2']:.2f}, Outlier: {metrics['margin_outlier_pct']:.1f}%")
         except Exception as e:
             st.write(f"Could not render regression charts due to {e}")
     
