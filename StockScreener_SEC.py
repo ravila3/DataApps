@@ -202,7 +202,7 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin, re
             mask = ~np.isnan(y)
         else:
             z = 0.6745 * (y - median) / mad
-            mask = (np.abs(z) < 20.0) & ~np.isnan(y)
+            mask = (np.abs(z) < 6.0) & ~np.isnan(y)
 
         y_clean = y[mask]
         # st.write(y_clean) #debug
