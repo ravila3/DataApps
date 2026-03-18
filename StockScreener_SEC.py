@@ -516,7 +516,13 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             metrics['last_3q_revenue_growth'] = np.median(revenue_growths)
         
     if plot_regression_bin==1:
-        remove_outliers = st.toggle("Remove outliers", value=False)
+        col1, col2 = st.columns([1,2])
+        with col1:
+            ticker=quarterly_df['ticker'].iloc[0]
+            url = f"https://finance.yahoo.com/quote/{ticker}/"
+            st.write("Click this for the Yahoo Finance Page (%s)" % url)
+        with col2:
+            remove_outliers = st.toggle("Remove outliers", value=False)
     else:
         remove_outliers=True
 
@@ -1375,7 +1381,7 @@ def show_regression_charts(cik):
     try: 
         quarterly_df=postgres_read('stock_quarterly_financials_sec',f"cik='{cik}'")
         company_and_ticker=quarterly_df['company_and_ticker'].iloc[0]
-        ticker=quarterly_df['ticker'].iloc[0]
+        # ticker=quarterly_df['ticker'].iloc[0]
         column_specs = get_column_specs_quarterly_df()
         pg_to_pretty = {spec["pg_name"]: pretty for pretty, spec in column_specs.items()}
         quarterly_df = quarterly_df.rename(columns=pg_to_pretty)
@@ -1385,8 +1391,6 @@ def show_regression_charts(cik):
         company_description=ss.rankings_df.loc[ss.rankings_df['cik']==cik,'company_desc'].iloc[0]
         st.write('')
         st.write(f":blue[{company_description}]")
-        url = f"https://finance.yahoo.com/quote/{ticker}/"
-        st.write("Click this for the Yahoo Finance Page (%s)" % url)
     except Exception as e:
         exc_type, exc_obj, tb = sys.exc_info()
         filename = tb.tb_frame.f_code.co_filename
