@@ -37,6 +37,8 @@ if "quarterly_financials" not in ss:
     ss.view_stock_analysis_form=False
     ss.qtr_data_form=False
     ss.process_yahoo_and_statistics=False
+    ss.load_sec_incremental_filings=False
+    ss.load_sec_full_filings=False
     ss.selected_company=None
     ss.hide_menu=False
     ss.show_transaction_form=False
@@ -53,7 +55,7 @@ if "quarterly_financials" not in ss:
     ss.filter_min_income_growth = 0
     ss.filter_min_last3_income_positive = 0
     ss.filter_max_rev_outlier_pct = 0
-    ss.filter_min_last_filing_date = (datetime.today() - timedelta(days=365)).date()
+    ss.filter_min_last_filing_date = ss.temp_filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
     ss.filter_industry = None
     ss.filter_sector = None
         
@@ -1085,6 +1087,8 @@ def write_sec_data_into_db(load_type):
         print('Got list of cik to update for incremental load')
     
     # Now that you have cik_list, go get the data
+    if len(cik_list)==0:
+        st.write('No SEC filings to get')
     progress_bar = st.progress(0)
     status = st.empty()
     total = len(cik_list)
@@ -1151,7 +1155,7 @@ def write_sec_data_into_db(load_type):
     # Now go get the rest of the data for thesee companies and run regressions, and update the stock_growth_analysis_results
     ss.results_df = rank_companies_by_growth_and_update_DB(cik_list)
     st.write(ss.results_df) # debug?
-    st.stop()
+    # st.stop() debug
     return
 
 def load_quarterly_sec_data_from_db():
@@ -1408,6 +1412,7 @@ def show_regression_charts(cik):
 
 def reset_forms_ss_vars():
     ss.hide_menu=ss.view_stock_analysis_form=ss.show_transaction_form=ss.qtr_data_form=ss.investment_returns_form=ss.process_yahoo_and_statistics=False
+    ss.load_sec_incremental_filings=ss.load_sec_full_filings=False
     ss.selected_company=None
     return
 
@@ -1779,7 +1784,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             company_and_ticker=st.selectbox("Search for specific company (negates other filters, set to 'None' to clear):",options=company_options,index=0)
             
         with col2:
-            min_last_filing_date = st.date_input("Min Last Filing Date?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
+            min_last_filing_date = st.date_input("Min Last Filing Date (set to future date to ignore)?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
             min_revenue_growth = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",key="temp_filter_min_revenue_growth", min_value=0, max_value=100, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
             min_income_growth = st.number_input("Min Quarterly Income Growth % (0 = No filter)?", key='temp_filter_min_income_growth', min_value=0, max_value=10, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_income_growth",))
             # min_revenue_r2 = st.number_input("Min Revenue R2 (0 = No Filter)?", key='temp_filter_min_revenue_r2', min_value=0.00, max_value=1.00, step=0.10, format="%.2f", on_change=update_primary_filter_session_value, args=("filter_min_revenue_r2",))
@@ -1828,7 +1833,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         if ss.filter_max_trailing_ps != 0:
             mask &= (ss.editable_stock_growth_analysis_df['trailing_ps'] <= ss.filter_max_trailing_ps)
         
-        if ss.filter_min_last_filing_date != None:
+        today = datetime.now().date()
+        if ss.filter_min_last_filing_date is not None and ss.filter_min_last_filing_date <= today:
             ss.editable_stock_growth_analysis_df['max_filing_date'] = pd.to_datetime(
                     ss.editable_stock_growth_analysis_df['max_filing_date'],
                     errors='coerce')    
@@ -1981,7 +1987,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 # set page config and title
 st.set_page_config( page_title="Stock Screener", layout="wide" )
 st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Stocks</h2>', unsafe_allow_html=True)
-st.write('Created by Rafael Avila leveraging Snowflake & Streamlit, using SEC Filings data provided by SEC Edgar platform. Analysis Summary and AI chat powered by mistral-large2 AI model')
+st.write('Created by Rafael Avila leveraging Streamlit and Postgres, using SEC Filings data provided by SEC Edgar platform and Stock data from Yahoo Finance.')
 
 def main():
 
@@ -2034,17 +2040,29 @@ def main():
         
     if load_incremental_sec_btn:
         reset_forms_ss_vars()
+        ss.load_sec_incremental_filings = True
         write_sec_data_into_db('incremental')
+        
+    if ss.load_sec_incremental_filings == True:
+        ss.rankings_df=load_stock_growth_analysis_data_from_db()
+        st.write("Incremental Load Completed Successfully for New SEC Filings")
+        reset_forms_ss_vars()
         ss.view_stock_analysis_form=True
         ss.hide_menu=True
-        st.rerun()
+        st.stop()
 
     if load_full_sec_btn:
         reset_forms_ss_vars()
+        ss.load_sec_full_filings = True
         write_sec_data_into_db('full')
+
+    if ss.load_sec_full_filings == True:
+        ss.rankings_df=load_stock_growth_analysis_data_from_db()
+        st.write("Full Load Completed Successfully for SEC Filings")
+        reset_forms_ss_vars()
         ss.view_stock_analysis_form=True
         ss.hide_menu=True
-        st.rerun()
+        st.stop()
         
     if investment_returns_btn:
         reset_forms_ss_vars()
