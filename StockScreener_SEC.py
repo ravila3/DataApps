@@ -647,7 +647,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                     # revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
-                    annualized_growth = ((1+(metrics['revenue_growth_pct'])/100) **4 - 1)* 100 * np.sign(metrics['revenue_growth_pct'])
+                    annualized_growth = ((1+(metrics['revenue_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['revenue_growth_pct'])
                     # st.write(f"metrics['revenue_growth_pct']={metrics['revenue_growth_pct']}, annualized={annualized_growth}")
                     centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['revenue_r2']:.2f}, Outlier: {metrics['revenue_outlier_pct']:.1f}%")
             if chart_income is not None:
@@ -655,14 +655,15 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                     # income_slope_pct = (metrics['income_growth_slope'] / metrics['income_growth_median'] * 100) if metrics['income_growth_median'] != 0 else 0
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_income, width='stretch')
-                    annualized_growth = ((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100 * np.sign(metrics['income_growth_pct'])
+                    # st.write(f"metrics['income_growth_pct']=  {((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100}, np.sign = {np.sign(metrics['income_growth_pct'])}") #debug
+                    annualized_growth = ((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['income_growth_pct'])
                     centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['income_r2']:.2f}, Outlier: {metrics['income_outlier_pct']:.1f}%")
             if chart_margin is not None:
                 with col3:
                     # margin_slope_pct = (metrics['margin_growth_slope'] / metrics['margin_growth_median'] * 100) if metrics['margin_growth_median'] != 0 else 0
                     placeholder=st.empty()
                     placeholder.altair_chart(chart_margin, width='stretch')
-                    annualized_growth = ((1+(metrics['margin_growth_pct'])/100) **4 - 1)* 100 * np.sign(metrics['margin_growth_pct'])
+                    annualized_growth = ((1+(metrics['margin_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['margin_growth_pct'])
                     centered_text   (f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['margin_r2']:.2f}, Outlier: {metrics['margin_outlier_pct']:.1f}%")
         except Exception as e:
             st.write(f"Could not render regression charts due to {e}")
@@ -689,6 +690,10 @@ def compute_value_score(company_and_ticker, m, trailing_pe, forward_pe, trailing
         capped_rev_growth_PCT=min(m['revenue_growth_pct'],100)
         capped_inc_growth_PCT=min(m['income_growth_pct'],2*capped_rev_growth_PCT)
         capped_margin_growth_slope=min(m['margin_growth_pct'],10)
+        
+        # st.write(f"capped_rev_growth_PCT = {capped_rev_growth_PCT}, capped_inc_growth_PCT = {capped_inc_growth_PCT}") #debug
+        # st.write(f"m['income_growth_pct']={m['income_growth_pct']}")
+        # st.stop() #debug
         
         GQ = safe_round((
             1.4 * (capped_rev_growth_PCT * m['revenue_r2'])
