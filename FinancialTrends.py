@@ -360,6 +360,8 @@ def main():
 
             stats=ticker.info
             # st.write('yahoo stats',stats) #debug write out yahoo dict
+            # earnings_df = ticker.get_earnings_dates() #debug
+            # st.write(earnings_df) #debug
             ss.company_name = stats.get('shortName', 'Unknown Company Name')
 
             # CompanyInfoYahoo: tuples of (field_name, format) OR (field_name, format, thresholds)

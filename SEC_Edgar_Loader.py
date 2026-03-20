@@ -965,13 +965,14 @@ def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> p
         year = current.year
         qtr = (current.month - 1) // 3 + 1
         url = f"{SEC_DAILY_INDEX_BASE}/{year}/QTR{qtr}/master.{current:%Y%m%d}.idx"
-        # st.write(f'loading {url}')
+        st.write(f'loading {url}')
 
         response = get_edgar_data(url)
 
         # If the file doesn't exist (weekends, holidays), skip it
         if response.status_code != 200:
             current += dt.timedelta(days=1)
+            st.write(f"Skipping due to response.status_code = {response.status_code}")
             continue
 
         text = response.text
@@ -984,6 +985,7 @@ def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> p
             dtype={"cik": str},
             engine="python"
         )
+        # st.write("initial df:",df) #debug
 
         df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
         df["cik"] = df["cik"].astype(str).str.zfill(10)
@@ -991,7 +993,7 @@ def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> p
         df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
         forms_upper = [f.upper() for f in forms_filter_list]
         df=df[df["form"].isin(forms_upper)].reset_index(drop=True)
-        # st.write(df) #debug
+        st.write(f"{df.count()} companies reported on {current}")
         all_dfs.append(df)
         current += dt.timedelta(days=1)
 

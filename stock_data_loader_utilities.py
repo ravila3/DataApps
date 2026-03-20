@@ -142,6 +142,25 @@ def yahoo_finance_load(ticker):
         # sp=historical_prices.reset_index()
         # sp=sp.rename(columns={'Close':'Stock Price'})
         stats=ticker.info
+        
+        def get_hist_price(ticker_obj, target_date):
+            # Fetch 3 days of data to ensure we hit a trading day
+            start_date = target_date - timedelta(days=3)
+            hist = ticker_obj.history(start=start_date, end=target_date + timedelta(days=1))
+            return hist['Close'].iloc[-1] if not hist.empty else None
+        
+        stats['price_1w_ago'] = get_hist_price(ticker, today - timedelta(days=7))
+        # stats['price_1m_ago'] = get_hist_price(ticker, today - timedelta(days=30))
+        # stats['price_6m_ago'] = get_hist_price(ticker, today - timedelta(days=180))
+        # stats['price_1y_ago'] = get_hist_price(ticker, today - timedelta(days=365))
+    
+        # 2. Fetch Earnings Date (Existing logic)
+        earnings_df = ticker.get_earnings_dates(limit=5)
+        if earnings_df is not None and not earnings_df.empty:
+            now = pd.Timestamp.now(tz=earnings_df.index.tz)
+            future_dates = earnings_df.index[earnings_df.index >= now]
+            stats['next_earnings'] = future_dates.min() if not future_dates.empty else None
+            
         time.sleep(0.2)  # brief pause to avoid rate limiting
     except ValueError as e:
         stats = None 
@@ -258,6 +277,22 @@ def postgres_update(df, table_name, primary_key_columns=None):
     # Sanitize column names
     df = df.copy()
     df.columns = [sanitize_column_name(c) for c in df.columns]
+    
+    # 1) replace pandas missing values (NaN, NaT, pd.NA) with None
+    df = df.where(pd.notnull(df), None)
+
+    # 2) convert pandas.Timestamp to python datetime for all datetime-like columns
+    for col, dtype in df.dtypes.items():
+        if "datetime" in str(dtype) or str(dtype).startswith("datetime64"):
+            def _to_py_dt(v):
+                if v is None:
+                    return None
+                # pandas.Timestamp -> python datetime (preserve tz if present)
+                if isinstance(v, pd.Timestamp):
+                    # if tz-naive, treat as UTC or leave naive depending on your policy
+                    return v.to_pydatetime()
+                return v
+            df[col] = df[col].apply(_to_py_dt)
 
     # Replace Infinity
     df.replace('Infinity', np.nan, inplace=True)
