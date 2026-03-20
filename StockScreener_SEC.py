@@ -57,6 +57,7 @@ if "quarterly_financials" not in ss:
     ss.filter_min_last3_income_positive = 0
     ss.filter_max_rev_outlier_pct = 0
     ss.filter_min_last_filing_date = ss.temp_filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
+    ss.filter_company_and_ticker = None
     ss.filter_industry = None
     ss.filter_sector = None
 
@@ -266,7 +267,7 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin, re
     # st.dataframe(debug_df)    
 
     # Need at least 6 points after filtering
-    if len(y_clean) >= 6:
+    if len(y_clean) >= 4:
         coeffs = np.polyfit(X_clean, y_clean, 1)
         slope, intercept = coeffs
 
@@ -285,6 +286,10 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin, re
         residuals = y_clean - y_pred
         last_n = min(3, len(residuals)) # if less than 3 points, take all
         avg_residual_last3 = residuals[-last_n:].mean()
+    else:
+        slope = intercept = r2 = n_outliers = avg_residual_last3 = None
+        st.write(f"Not enough points to calculate regression on {name}, {var_name}")
+
     return slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart
 
 def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
@@ -1910,7 +1915,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             max_revenue_median = st.number_input("Max Revenue Median? (0 = No Filter)", value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), min_value=0, step=1000000, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",)) # max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1, on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
             max_trailing_pe = st.number_input("Max trailing PE (0 = No Filter)?", key='filter_max_trailing_pe', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_pe",))
             max_trailing_ps = st.number_input("Max trailing PS (0 = No Filter)?", key='filter_max_trailing_ps', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_ps",))
-            company_and_ticker=st.selectbox("Search for specific company (negates other filters, set to 'None' to clear):",options=company_options,index=0)
+            company_and_ticker=st.selectbox("Search for specific company (negates other filters, set to 'None' to clear):",options=company_options,index=0, key='temp_filter_company_and_ticker', on_change=update_primary_filter_session_value, args=("filter_company_and_ticker",))
             
         with col2:
             min_last_filing_date = st.date_input("Min Last Filing Date (set to future date to ignore)?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
@@ -1922,9 +1927,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             # min_revenue_n_count = st.number_input("Min revenue N count?", key='temp_filter_min_revenue_n_count', min_value=0, max_value=ss.filter_min_revenue_n_count, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_n_count",))
             # max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?", min_value=0, max_value=100, step=5, format="%d", on_change=update_primary_filter_session_value, args=("filter_rev_outlier_pct",))
 
-    if company_and_ticker != None:
+    if ss.filter_company_and_ticker != None:
         # st.write(company_and_ticker) #debug
-        selected_cik = ss.rankings_df.loc[ss.rankings_df['company_and_ticker'] == company_and_ticker, "cik"].iloc[0]
+        selected_cik = ss.rankings_df.loc[ss.rankings_df['company_and_ticker'] == ss.filter_company_and_ticker, "cik"].iloc[0]
         mask = ss.editable_stock_growth_analysis_df['cik'] == selected_cik
         ss.selected_company=selected_cik
     else:
