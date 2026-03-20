@@ -1455,6 +1455,8 @@ def reset_forms_ss_vars():
 def update_primary_filter_session_value(key):
     temp_key = 'temp_'+key
     ss[key] = ss[temp_key]
+    if key != 'filter_company_and_ticker':
+        ss.filter_company_and_ticker=ss.temp_filter_company_and_ticker=None
 
 def show_investment_returns():
     transactions_df=load_stock_transactions_from_db()
@@ -1915,15 +1917,15 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             max_revenue_median = st.number_input("Max Revenue Median? (0 = No Filter)", value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), min_value=0, step=1000000, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",)) # max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1, on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
             max_trailing_pe = st.number_input("Max trailing PE (0 = No Filter)?", key='filter_max_trailing_pe', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_pe",))
             max_trailing_ps = st.number_input("Max trailing PS (0 = No Filter)?", key='filter_max_trailing_ps', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_ps",))
-            company_and_ticker=st.selectbox("Search for specific company (negates other filters, set to 'None' to clear):",options=company_options,index=0, key='temp_filter_company_and_ticker', on_change=update_primary_filter_session_value, args=("filter_company_and_ticker",))
+            min_last_filing_date = st.date_input("Min Last Filing Date (set to future date to ignore)?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
             
         with col2:
-            min_last_filing_date = st.date_input("Min Last Filing Date (set to future date to ignore)?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
             min_revenue_growth = st.number_input("Min Quarterly Revenue Growth %? (0 = No filter)",key="temp_filter_min_revenue_growth", min_value=0, max_value=100, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
             min_income_growth = st.number_input("Min Quarterly Income Growth % (0 = No filter)?", key='temp_filter_min_income_growth', min_value=0, max_value=10, step=1, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_income_growth",))
             # min_revenue_r2 = st.number_input("Min Revenue R2 (0 = No Filter)?", key='temp_filter_min_revenue_r2', min_value=0.00, max_value=1.00, step=0.10, format="%.2f", on_change=update_primary_filter_session_value, args=("filter_min_revenue_r2",))
             industry = st.selectbox("Select industry to include ('None' to clear selection)", key='temp_filter_industry',options=industry_list,index=0, on_change=update_primary_filter_session_value, args=("filter_industry",))
             sector = st.selectbox("Select sector to include ('None' to clear selection)", key='temp_filter_sector',options=sector_list,index=0, on_change=update_primary_filter_session_value, args=("filter_sector",))
+            company_and_ticker=st.selectbox("Search for specific company (negates other filters, set to 'None' to clear):",options=company_options,index=0, key='temp_filter_company_and_ticker', on_change=update_primary_filter_session_value, args=("filter_company_and_ticker",))
             # min_revenue_n_count = st.number_input("Min revenue N count?", key='temp_filter_min_revenue_n_count', min_value=0, max_value=ss.filter_min_revenue_n_count, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_n_count",))
             # max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?", min_value=0, max_value=100, step=5, format="%d", on_change=update_primary_filter_session_value, args=("filter_rev_outlier_pct",))
 
