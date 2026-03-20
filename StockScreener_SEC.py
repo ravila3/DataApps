@@ -1995,41 +1995,77 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 
     # st.write("styled df:",styled) #debug
 
+    # def on_change_handle():
+    #     if "my_editor" not in ss:
+    #         return
+        
+    #     editor_state = ss['my_editor']
+        
+    #     if "edited_rows" not in editor_state:
+    #         return
+        
+    #     edited = editor_state["edited_rows"]
+    #     df = ss.get("filtered_df")
+
+    #     if df is None:
+    #         return
+        
+    #     if "prev_edits" not in ss:
+    #         ss.prev_edits={}
+            
+    #     prev = ss.prev_edits
+        
+    #     new_changes = {
+    #         idx: changes
+    #         for idx, changes in edited.items()
+    #         if idx not in prev or prev[idx] != changes
+    #     }
+
     def on_change_handle():
-        if "my_editor" not in ss:
+        if "my_editor" not in ss or "filtered_df" not in ss:
             return
         
         editor_state = ss['my_editor']
-        
-        if "edited_rows" not in editor_state:
-            return
-        
-        edited = editor_state["edited_rows"]
+        edited = editor_state.get("edited_rows", {})
         df = ss.get("filtered_df")
-
-        if df is None:
-            return
         
         if "prev_edits" not in ss:
-            ss.prev_edits={}
+            ss.prev_edits = {}
             
-        prev = ss.prev_edits
+        new_field_changes = {}
+
+        for row_idx, current_row_changes in edited.items():
+            # Get what we previously knew about this specific row
+            prev_row_changes = ss.prev_edits.get(row_idx, {})
+            
+            # Check each specific column in this row
+            for col_name, new_val in current_row_changes.items():
+                # If the column wasn't in prev_edits, or the value has changed
+                if col_name not in prev_row_changes or prev_row_changes[col_name] != new_val:
+                    if row_idx not in new_field_changes:
+                        new_field_changes[row_idx] = {}
+                    
+                    # Capture the specific field change
+                    new_field_changes[row_idx][col_name] = new_val
+                    
+                    # Optional: Trigger your modal flag here if a specific field changes
+                    # ss.show_modal = True 
+
+        # Update our tracker with the current full state
+        ss.prev_edits = edited.copy()
         
-        new_changes = {
-            idx: changes
-            for idx, changes in edited.items()
-            if idx not in prev or prev[idx] != changes
-        }
+        # Store just the "new" delta if needed elsewhere
+        ss.last_delta = new_field_changes
 
         # st.write(ss.prev_edits) #debug
         # st.write(edited) #debug
-        # st.write(new_changes) #debug
+        # st.write(ss.last_delta) #debug
         # st.write(df) #debug
         # st.stop()
         ss.prev_edits = edited
         
         # Process checkbox clicks even if "data" is missing
-        for row_index, changes in new_changes.items():
+        for row_index, changes in ss.last_delta.items():
             cik = df.loc[row_index, "cik"]
             company_and_ticker = df.loc[row_index, "company_and_ticker"]
             if changes.get("chart") is True:
@@ -2045,11 +2081,20 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 ss.rerun_the_application=True
                 # trasaction_modal(cik, company_and_ticker)
                 
-            if "category" in changes or "notes" in changes:
-                update_df = ss.filtered_df.loc[[row_index], ['cik','ticker','company_and_ticker','category','notes','stock_price','trailing_pe','trailing_ps']]
+            if "category" in changes:
+                update_df = ss.filtered_df.loc[[row_index], ['cik','ticker','company_and_ticker','category','stock_price','trailing_pe','trailing_ps']]
                 new_category = changes.get("category", df.loc[row_index,"category"])
-                new_notes = changes.get("notes", df.loc[row_index,"notes"])
                 update_df['category']=new_category
+
+                try:
+                    postgres_update(update_df, 'editable_stock_data', ['cik']) 
+                    st.toast('Change Committed to DB')
+                except Exception as e:
+                    st.warning(f'Change failed due to {e}')
+
+            if "notes" in changes:
+                update_df = ss.filtered_df.loc[[row_index], ['cik','ticker','company_and_ticker','notes','stock_price','trailing_pe','trailing_ps']]
+                new_notes = changes.get("notes", df.loc[row_index,"notes"])
                 update_df['notes']=new_notes
 
                 try:
