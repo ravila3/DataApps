@@ -2034,13 +2034,13 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         st.write()
         st.write(f"Current filters selecting {len(ss.editable_stock_growth_analysis_df[mask])} companies")
     with col2:
-        sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
-    with col3:
-        st.write()
-        sort_direction = st.radio("Sort Direction?", options=["Asc","Desc"],index=1,key='temp_sort_direction', on_change=update_primary_filter_session_value, args=("sort_direction",))
-    with col4:
         st.write()
         column_include_regression = st.checkbox("Include Regression Fields (may slow performance on large datasets)", value=False,key='column_include_regression')
+    with col3:
+        sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
+    with col4:
+        st.write()
+        sort_direction = st.radio("Sort Direction?", options=["Asc","Desc"],index=1,key='temp_sort_direction', on_change=update_primary_filter_session_value, args=("sort_direction",))
 
     extra_columns=['Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
