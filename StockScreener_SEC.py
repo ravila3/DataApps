@@ -1474,7 +1474,25 @@ def reset_forms_ss_vars():
     ss.hide_menu=ss.view_stock_analysis_form=ss.transaction_show_modal=ss.show_transaction_form=ss.qtr_data_form=ss.investment_returns_form=ss.process_yahoo_and_statistics=False
     ss.load_sec_incremental_filings=ss.load_sec_full_filings=False
     ss.selected_company=None
+    ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
+    ss.filter_min_revenue_growth=0
+    ss.filter_max_revenue_median=0
+    ss.filter_min_revenue_n_count=10
+    ss.filter_max_trailing_pe = 0
+    ss.filter_max_trailing_ps = 0
+    ss.filter_min_revenue_r2 = 0.0
+    ss.filter_min_revenue_growth = 0
+    ss.filter_min_income_growth = 0
+    ss.filter_min_last3_income_positive = 0
+    ss.filter_max_rev_outlier_pct = 0
+    ss.filter_min_last_filing_date = ss.temp_filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
+    ss.filter_company_and_ticker = None
+    ss.filter_industry = None
+    ss.filter_sector = None
+    ss.sort_column = 'Consolidated_Score'
+    ss.sort_direction = 'Desc'
     ss.prev_edits={}
+    
     return
 
 def update_primary_filter_session_value(key):
