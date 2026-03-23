@@ -45,6 +45,7 @@ if "quarterly_financials" not in ss:
     ss.investment_returns_form=False
     ss.transaction_show_modal=False
     ss.rerun_the_application=False
+    ss.columns_include_regression=False
     ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
     ss.filter_min_revenue_growth=0
     ss.filter_max_revenue_median=0
@@ -60,6 +61,8 @@ if "quarterly_financials" not in ss:
     ss.filter_company_and_ticker = None
     ss.filter_industry = None
     ss.filter_sector = None
+    ss.sort_column = 'Consolidated_Score'
+    ss.sort_direction = 'Desc'
 
 if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
@@ -802,7 +805,7 @@ def collect_data_for_company(cik):
 
     try:
         ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
-        max_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_filing_date'].max()
+        last_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'last_filing_date'].max()
         max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
         company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
         quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
@@ -827,7 +830,7 @@ def collect_data_for_company(cik):
         # price_1m_ago = yahoo_stats.get("price_1m_ago")
         # price_6m_ago = yahoo_stats.get("price_6m_ago")
         # price_1y_ago = yahoo_stats.get("price_1y_ago")
-        stock_price_update_datetime=pd.Timestamp.now(tz="UTC")
+        stock_price_update_datetime=pd.Timestamp.now(tz="UTC").floor('min')
 
         # st.write(company_and_ticker, trailing_pe,forward_pe,trailing_ps,next_earnings,price_1wk_ago,price_1mo_ago) #debug
         # st.json(yahoo_stats) #debug
@@ -893,7 +896,7 @@ def collect_data_for_company(cik):
         'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
         'Margin_R2': safe_round(metrics['margin_r2'], 4),
         'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
-        'max_filing_date': max_filing_date,
+        'last_filing_date': last_filing_date,
         'max_report_date': max_report_date,
         'next_earnings': next_earnings,
         'stock_price_update_datetime': stock_price_update_datetime,
@@ -1120,22 +1123,22 @@ def write_sec_data_into_db(load_type):
     
     if load_type == 'incremental':
         stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
-        stock_growth_analysis_df['max_filing_date'] = pd.to_datetime(
-                stock_growth_analysis_df['max_filing_date'],
+        stock_growth_analysis_df['last_filing_date'] = pd.to_datetime(
+                stock_growth_analysis_df['last_filing_date'],
                 errors='coerce'
             )
-        df = stock_growth_analysis_df.dropna(subset=['max_filing_date'])
+        df = stock_growth_analysis_df.dropna(subset=['last_filing_date'])
         # st.write(df) #debug
-        last_date_loaded=pd.to_datetime(df['max_filing_date'].max(), errors='coerce')
+        last_date_loaded=pd.to_datetime(df['last_filing_date'].max(), errors='coerce')
         # last_date_loaded=pd.to_datetime('2026-03-10') #debug
         # st.write(last_date_loaded) #debug
         filings_10q_10k_df = load_daily_SEC_submission_index(last_date_loaded, forms_filter_list=['10-Q','10-K']) # '8-K'
         # st.write("filings_10q_10k_df",filings_10q_10k_df) #debug
-        merged_sec_filings=filings_10q_10k_df.merge(stock_growth_analysis_df[['cik','max_filing_date']],on='cik', how='left')
+        merged_sec_filings=filings_10q_10k_df.merge(stock_growth_analysis_df[['cik','last_filing_date']],on='cik', how='left')
         # st.write('merged_sec_filings',merged_sec_filings) #debug
         filtered_sec_filings = merged_sec_filings.loc[
-            (merged_sec_filings['date'] > merged_sec_filings['max_filing_date'])
-            # | merged_sec_filings['max_filing_date'].isna()
+            (merged_sec_filings['date'] > merged_sec_filings['last_filing_date'])
+            # | merged_sec_filings['last_filing_date'].isna()
         ]
 
         st.write('SEC Filings to Load',filtered_sec_filings)
@@ -1177,9 +1180,9 @@ def write_sec_data_into_db(load_type):
             ss.quarterly_financials.insert(0, 'company_and_ticker', col)
             filings_10q_10k_df = ss.filings_df[ss.filings_df['form'].isin(['10-Q', '10-K'])]
             # st.dataframe(filings_10q_10k_df)  # debug
-            max_filing_date= filings_10q_10k_df['filingDate'].max() if not filings_10q_10k_df.empty else None
+            last_filing_date= filings_10q_10k_df['filingDate'].max() if not filings_10q_10k_df.empty else None
             max_report_date = filings_10q_10k_df['reportDate'].max() if not filings_10q_10k_df.empty else None
-            ss.quarterly_financials['max_filing_date'] = max_filing_date
+            ss.quarterly_financials['last_filing_date'] = last_filing_date
             ss.quarterly_financials['max_report_date'] = max_report_date
 
             # If quarterly data isn't present, surface a message and stop further processing
@@ -1479,6 +1482,8 @@ def update_primary_filter_session_value(key):
     ss[key] = ss[temp_key]
     if key != 'filter_company_and_ticker':
         ss.filter_company_and_ticker=ss.temp_filter_company_and_ticker=None
+    if 'sort' in key.lower():
+        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
 
 def show_investment_returns():
     print("entering into show_investment_returns function")
@@ -1811,14 +1816,15 @@ def transaction_show_modal():
         return
 
 def display_stock_analysis_form(stock_growth_analysis_df):
-    print("entering into display_stock_analysis_form function")
     # with color_button('green'):
     #     enter_transaction_btn = st.button('Enter Stock Buy/Sell Transaction')
     # if enter_transaction_btn:
     #     ss.show_transaction_form=True
     #     st.rerun()
+    print("entering into display_stock_analysis_form function")
 
     if ss.rerun_the_application==True:
+        print('ss.rerun the application set, rerunning from top of display_stock_analysis_form')
         ss.rerun_the_application=False
         st.rerun()
         
@@ -1828,12 +1834,11 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['stock_price', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
+        'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
+        'last_filing_date','next_earnings','stock_price_update_datetime',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
-        'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers',
-        'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-        'max_filing_date','next_earnings','stock_price_update_datetime'
-        ]
+        'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers']
 
     # st.write("**Stock Growth Analysis Data:**")
     # st.write(len(ss.editable_stock_growth_analysis_df)) # debug
@@ -2011,19 +2016,53 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         
         today = datetime.now().date()
         if ss.filter_min_last_filing_date is not None and ss.filter_min_last_filing_date <= today:
-            ss.editable_stock_growth_analysis_df['max_filing_date'] = pd.to_datetime(
-                    ss.editable_stock_growth_analysis_df['max_filing_date'],
+            ss.editable_stock_growth_analysis_df['last_filing_date'] = pd.to_datetime(
+                    ss.editable_stock_growth_analysis_df['last_filing_date'],
                     errors='coerce')    
             selected_date = ss.filter_min_last_filing_date
             if isinstance(selected_date, (list, tuple)):
                 selected_date = selected_date[0] if len(selected_date) > 0 else None
-            mask &= (ss.editable_stock_growth_analysis_df['max_filing_date'] >= pd.to_datetime(ss.filter_min_last_filing_date))
-        
-    ss.filtered_df = ss.editable_stock_growth_analysis_df[mask]
-    st.write(f"Current filters selecting {len(ss.filtered_df)} companies")
-        
-    ss.filtered_df=ss.filtered_df.reset_index(drop=True)
+            mask &= (ss.editable_stock_growth_analysis_df['last_filing_date'] >= pd.to_datetime(ss.filter_min_last_filing_date))
+    
+    sort_columns=['Consolidated_Score','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago', 'industry', 'sector',
+        'Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
+        'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
+        'last_filing_date','next_earnings','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.write()
+        st.write(f"Current filters selecting {len(ss.editable_stock_growth_analysis_df[mask])} companies")
+    with col2:
+        sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
+    with col3:
+        st.write()
+        sort_direction = st.radio("Sort Direction?", options=["Asc","Desc"],index=1,key='temp_sort_direction', on_change=update_primary_filter_session_value, args=("sort_direction",))
+    with col4:
+        st.write()
+        column_include_regression = st.checkbox("Include Regression Fields (may slow performance on large datasets)", value=False,key='column_include_regression')
 
+    extra_columns=['Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
+        'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
+        'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers'
+        ]
+
+    # add back chart and action buttons
+    if ss.column_include_regression == False:
+        extra_column_set = set(extra_columns)
+        columns = ['chart','action']+[c for c in columns if c not in extra_column_set]
+    
+    # ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
+    # st.write(f"ss.sort_column={ss.sort_column}") #ss.editable_stock_growth_analysis_df) #debug
+    
+    ss.filtered_df = (
+        ss.editable_stock_growth_analysis_df
+            .loc[mask,[c for c in columns if c in ss.editable_stock_growth_analysis_df.columns]]
+            # .sort_values(ss.sort_column,ascending=(sort_direction=="Asc"))
+            .reset_index(drop=True)
+            .copy()
+    )
+    
     with color_button('blue'):
         update_yahoo_and_stats_btn = st.button('Hit this button to update Yahoo Stock Data for CURRENTLY SELECTED Stocks (only when stock price needs updating or selection widens)')
 
@@ -2090,7 +2129,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             company_and_ticker = df.loc[row_index, "company_and_ticker"]
             if changes.get("chart") is True:
                 ss.selected_company = cik
-                ss.rerun_the_application=True
+                # ss.rerun_the_application=True
             
             if changes.get("action") is True:
                 st.write('Setting show modal flag to true') #debug
@@ -2130,9 +2169,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
                 'action':st.column_config.CheckboxColumn(label='Buy/Sell', width="small", pinned=True),
                 # "Yahoo_Link": st.column_config.LinkColumn(label="Links",display_text="https://finance.yahoo.com",display_text="Open Chart ↗"),
-                'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
-                'industry': st.column_config.TextColumn(label="industry", width="small"),
-                'sector': st.column_config.TextColumn(label="sector", width="small"),
+                'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width=100),
+                'industry': st.column_config.TextColumn(label="industry", width=100),
+                'sector': st.column_config.TextColumn(label="sector"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 # 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
@@ -2165,10 +2204,11 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 "Income_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
                 "Margin_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
                 'Revenue_Growth_Median':st.column_config.NumberColumn(label="Revenue Median", format='dollar', step='int'),
-                "Last3Q_Revenue_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Revenue Growth %", format='%.1f', width="small"),
-                "Last3Q_Income_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Income Growth %", format='%.1f', width="small"),
-                "Last3Q_Margin_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Margin Growth %", format='%.1f', width="small"),
-                "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%.1f', width="small"),
+                "Last3Q_Revenue_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Revenue Growth %", format='%.1f'),
+                "Last3Q_Income_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Income Growth %", format='%.1f'),
+                "Last3Q_Margin_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Margin Growth %", format='%.1f'),
+                "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%.1f'),
+                "stock_price_update_datetime": st.column_config.DatetimeColumn(label="Price Update Time",format="MMM DD, hh:mm A",timezone="US/Pacific" ),
                 },
                 )
     
