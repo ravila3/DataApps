@@ -76,6 +76,14 @@ def safe_round(x, n=1):
 def safe_multiply(x, n=1):
     return x*n if isinstance(x, (int, float)) else None
 
+def safe_divide(x, n=1):
+    try:
+        answer=x/n
+    except Exception as e:
+        answer=None
+        print(f"Division failed due to {e}")
+    return answer
+
 def clean_number(x):
     # Reject None
     if x is None:
@@ -302,6 +310,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                - updated_quarterly_df: Original df with growth columns added
                - metrics_dict: Growth metrics including regression analysis
     """
+    print('Starting analyze_yoy_growth function')
     
     if quarterly_df.empty or len(quarterly_df) < 8:  # Need at least 2 years of data
         return quarterly_df, None
@@ -682,6 +691,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                     centered_text   (f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['margin_r2']:.2f}, Outlier: {metrics['margin_outlier_pct']:.1f}%")
         except Exception as e:
             st.write(f"Could not render regression charts due to {e}")
+    print("at end of analyze_yoy_growth function")
     
     return metrics
 
@@ -788,6 +798,7 @@ def compute_value_score(company_and_ticker, m, trailing_pe, forward_pe, trailing
 
 #Note that ss.quarterly_financials must be loaded for this to function
 def collect_data_for_company(cik):
+    print("entering into collect_data_for_company function")
 
     try:
         ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
@@ -796,13 +807,13 @@ def collect_data_for_company(cik):
         company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
         quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
         metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
-        # st.write('metrics:',metrics) #debug
+        # st.write('metrics:',metrics) #debug 
 
         yahoo_stats = yahoo_finance_load(ticker)
         industry = yahoo_stats.get('industry')
         sector = yahoo_stats.get('sector')
         company_desc = yahoo_stats.get('longBusinessSummary')
-        stock_price = yahoo_stats.get("currentPrice")
+        stock_price = safe_round(yahoo_stats.get("currentPrice"),2)
         price_range_52wks = yahoo_stats.get("fiftyTwoWeekRange")
         pct_chg_from_52wk_high = yahoo_stats.get("fiftyTwoWeekHighChangePercent")
         pct_chg_from_52wk_low = yahoo_stats.get("fiftyTwoWeekLowChangePercent")
@@ -810,7 +821,9 @@ def collect_data_for_company(cik):
         trailing_ps = clean_number(yahoo_stats.get("priceToSalesTrailing12Months"))
         forward_pe = clean_number(yahoo_stats.get("forwardPE"))
         next_earnings = yahoo_stats.get("next_earnings")
-        price_1w_ago = yahoo_stats.get("price_1w_ago")
+        price_1w_ago = clean_number(safe_round(yahoo_stats.get("price_1w_ago"),2))
+        pct_chg_from_1w_ago = safe_round(safe_divide(stock_price,price_1w_ago)*100-100,1)
+        # st.write(f"pct_chg_from_1w_ago={pct_chg_from_1w_ago}, price_1w_ago={price_1w_ago}") #debug
         # price_1m_ago = yahoo_stats.get("price_1m_ago")
         # price_6m_ago = yahoo_stats.get("price_6m_ago")
         # price_1y_ago = yahoo_stats.get("price_1y_ago")
@@ -885,6 +898,7 @@ def collect_data_for_company(cik):
         'next_earnings': next_earnings,
         'stock_price_update_datetime': stock_price_update_datetime,
         'price_1w_ago': price_1w_ago,
+        'pct_chg_from_1w_ago': pct_chg_from_1w_ago,
         # 'price_1m_ago': price_1m_ago,
         # 'price_6m_ago': price_6m_ago,
         # 'price_1y_ago': price_1y_ago,
@@ -899,10 +913,14 @@ def collect_data_for_company(cik):
         code_line = linecache.getline(filename, line_no).strip()
         st.write(f"Error on collect data for company for {cik} on file: {filename}, line #{line_no}, code line: {code_line}: {e}")
         return None
-        
+
+    print("at end of collect_data_for_company function")
+    # st.write("results",results) #debug
     return results
 
 def rank_companies_by_growth_and_update_DB(cik_list):
+    print('Starting rank_companies_by_growth_and_update_DB function')
+    
     """
     Rank companies by growth consistency.
     Args: companies_dict: Dictionary with company names as keys and quarterly DataFrames as values
@@ -928,6 +946,7 @@ def rank_companies_by_growth_and_update_DB(cik_list):
         progress_bar.progress((i + 1) / total)
         try: 
             results_for_cik=collect_data_for_company(cik)
+            # st.write("results_for_cik",results_for_cik) #debug
             if results_for_cik != None:
                 temp_df = pd.DataFrame([results_for_cik])
                 postgres_update(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
@@ -943,9 +962,9 @@ def rank_companies_by_growth_and_update_DB(cik_list):
         results_df = results_df.sort_values('Consolidated_Score', ascending=False)
     else:
         results_df=pd.DataFrame()
-    # st.write(results) #debug
+    # st.write(results_df) #debug
     # st.stop()
-    
+    print("at end of rank_companies_by_growth_and_update_DB function")
     return results_df
 
 def get_column_specs_results_df():
@@ -953,6 +972,9 @@ def get_column_specs_results_df():
         "cik": {"pg_name": "cik", "fmt": "{}"},
         "ticker": {"pg_name": "ticker", "fmt": "{}"},
         "company_and_ticker": {"pg_name": "company_and_ticker", "fmt": "{}"},
+        "Pct_Chg_from_52_Wk_High": {"pg_name": "pct_chg_from_52wk_high", "fmt": "{:.1f}"},
+        "Pct_Chg_from_52_Wk_Low": {"pg_name": "pct_chg_from_52wk_low", "fmt": "{:.1f}"},
+        "Pct_Chg_from_7_Days_Ago": {"pg_name": "pct_chg_from_1w_ago", "fmt": "{:.1f}"},
         "Consolidated_Score": {"pg_name": "consolidated_score", "fmt": "{:.1f}"},
         "Growth_Quality": {"pg_name": "growth_quality", "fmt": "{:.1f}"},
         "Recent_Momentum": {"pg_name": "recent_momentum", "fmt": "{:.1f}"},
@@ -1040,7 +1062,7 @@ def get_column_specs_quarterly_df():
 
 def color_button(color_name):
     COLORS = {
-        "blue":  "#070e79",
+        "blue":  "#073879",
         "red":   "#881915",
         "green": "#094217",
         "gray":  "#3e4246",
@@ -1459,6 +1481,7 @@ def update_primary_filter_session_value(key):
         ss.filter_company_and_ticker=ss.temp_filter_company_and_ticker=None
 
 def show_investment_returns():
+    print("entering into show_investment_returns function")
     transactions_df=load_stock_transactions_from_db()
     ss.rankings_df=load_stock_growth_analysis_data_from_db()
     transactions_df = transactions_df.merge(
@@ -1788,6 +1811,7 @@ def transaction_show_modal():
         return
 
 def display_stock_analysis_form(stock_growth_analysis_df):
+    print("entering into display_stock_analysis_form function")
     # with color_button('green'):
     #     enter_transaction_btn = st.button('Enter Stock Buy/Sell Transaction')
     # if enter_transaction_btn:
@@ -1801,17 +1825,19 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['stock_price', 'price_range_52wks', 'pct_chg_from_52wk_high', 'pct_chg_from_52wk_low', 
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['stock_price', # 'price_range_52wks',
+        'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-        'max_filing_date'
+        'max_filing_date','next_earnings','stock_price_update_datetime'
         ]
 
-    st.write("**Stock Growth Analysis Data:**")
-    if ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty:
+    # st.write("**Stock Growth Analysis Data:**")
+    # st.write(len(ss.editable_stock_growth_analysis_df)) # debug
+    if ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty or len(ss.rankings_df) == 0:
         column_specs=get_column_specs_results_df()
         rename_map = {
             spec["pg_name"]: pretty
@@ -1857,7 +1883,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 ,'Consolidated_Score','Growth_Quality','Recent_Momentum'
             ]
         cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
-        cols_for_color_dec = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','pct_chg_from_52wk_high','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
+        cols_for_color_dec = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
 
         q_inc = compute_quantiles(df, cols_for_color_inc)
         q_dec = compute_quantiles(df, cols_for_color_dec)
@@ -1909,6 +1935,20 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     
     counts = ss.rankings_df['sector'].value_counts(dropna=True)
     sector_list = [None] + counts.index.tolist()
+
+    st.markdown(
+        """
+        <style>
+        /* Outer container: the single border you want */
+        .stExpander > div[role="button"],
+        .streamlit-expander, details {
+            background-color: rgba(10,132,255,0.40) !important;
+            padding: 0.15rem 0.5rem !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     
     with st.expander("Expand to show filters", expanded=False):
         col1, col2 = st.columns(2)
@@ -1984,49 +2024,22 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         
     ss.filtered_df=ss.filtered_df.reset_index(drop=True)
 
-    with color_button('red'):
+    with color_button('blue'):
         update_yahoo_and_stats_btn = st.button('Hit this button to update Yahoo Stock Data for CURRENTLY SELECTED Stocks (only when stock price needs updating or selection widens)')
 
     if update_yahoo_and_stats_btn:
         cik_list = ss.filtered_df['cik'].tolist()   
-        results_df = rank_companies_by_growth_and_update_DB(cik_list)
-        with st.spinner(f"Saving Analysis Results to DB"):
-            postgres_update(results_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-            ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.iloc[0:0]
-            st.toast('Updated stock_growth_analysis_results on DB')
+        rank_companies_by_growth_and_update_DB(cik_list)
+        ss.rankings_df = ss.rankings_df.iloc[0:0]
+        # with st.spinner(f"Saving Analysis Results to DB"):
+        #     postgres_update(results_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+        #     ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.iloc[0:0]
+        #     st.toast('Updated stock_growth_analysis_results on DB')
         ss.view_stock_analysis_form=True
         st.rerun()
 
     # ss.df=filtered_df.copy()        
     styled = build_styler(ss.filtered_df)
-
-    # st.write("styled df:",styled) #debug
-
-    # def on_change_handle():
-    #     if "my_editor" not in ss:
-    #         return
-        
-    #     editor_state = ss['my_editor']
-        
-    #     if "edited_rows" not in editor_state:
-    #         return
-        
-    #     edited = editor_state["edited_rows"]
-    #     df = ss.get("filtered_df")
-
-    #     if df is None:
-    #         return
-        
-    #     if "prev_edits" not in ss:
-    #         ss.prev_edits={}
-            
-    #     prev = ss.prev_edits
-        
-    #     new_changes = {
-    #         idx: changes
-    #         for idx, changes in edited.items()
-    #         if idx not in prev or prev[idx] != changes
-    #     }
 
     def on_change_handle():
         if "my_editor" not in ss or "filtered_df" not in ss:
@@ -2118,11 +2131,14 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'action':st.column_config.CheckboxColumn(label='Buy/Sell', width="small", pinned=True),
                 # "Yahoo_Link": st.column_config.LinkColumn(label="Links",display_text="https://finance.yahoo.com",display_text="Open Chart ↗"),
                 'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width="small"),
+                'industry': st.column_config.TextColumn(label="industry", width="small"),
+                'sector': st.column_config.TextColumn(label="sector", width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
-                'price_range_52wks': st.column_config.TextColumn(),
+                # 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
-                'pct_chg_from_52wk_high':st.column_config.NumberColumn(label="% from 52wk High²", format='%.1f', width="small"),
-                'pct_chg_from_52wk_low':st.column_config.NumberColumn(label="% from 52wk Low", format='%.1f', width="small"),
+                'Pct_Chg_from_52_Wk_High':st.column_config.NumberColumn(label="% from 52wk High²", format='%.1f', width="small"),
+                'Pct_Chg_from_52_Wk_Low':st.column_config.NumberColumn(label="% from 52wk Low", format='%.1f', width="small"),
+                'Pct_Chg_from_7_Days_Ago':st.column_config.NumberColumn(label="% from 7 days ago", format='%.1f', width="small"),
                 'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", format='%.1f', width="small"),
                 'forward_pe':st.column_config.NumberColumn(label="P/E Fwd", format='%.1f', width="small"),
                 'trailing_ps':st.column_config.NumberColumn(label="P/S Trailing", format='%.1f', width="small"),
@@ -2159,6 +2175,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     # # open the modal
     if ss.transaction_show_modal == True:
         transaction_show_modal()
+        
+    print("at end of display_stock_analysis_form function")
 
     # # read result
     # if "modal_result" in st.session_state:
@@ -2184,7 +2202,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     if return_menu2_btn:
         reset_forms_ss_vars()
         st.rerun()
-
+print("entering into display_stock_analysis_form function")
 # set page config and title
 st.set_page_config( page_title="Stock Screener", layout="wide" )
 st.set_page_config(page_title="Stock Screener", layout="wide")
@@ -2223,6 +2241,7 @@ st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Sto
 st.write('Created by Rafael Avila leveraging Streamlit and Postgres, using SEC Filings data provided by SEC Edgar platform and Stock data from Yahoo Finance.')
 
 def main():
+    print("starting main function")
 
 # features to build:
 # stock charts & some specific timeframes (a day ago, week ago, month ago, 6m ago, 1yr ago, 5yr ago)
@@ -2376,5 +2395,6 @@ def main():
             
         st.write("**All Companies - Quarterly Data with Metrics:**")
         st.dataframe(quarterly_df[cols],width='stretch')
+    print("at end of main funtion")
                 
 main()

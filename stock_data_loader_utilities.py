@@ -124,6 +124,7 @@ def get_tickers_sec(ciks, delay=0.2):
 
 @st.cache_data(ttl=43200) # 43200 is 12 hrs in seconds 
 def yahoo_finance_load(ticker):
+    print("entering into yahoo_finance_load function")
     
     today = datetime.today().date()
     x_years_ago = today - timedelta(days=366)
@@ -147,9 +148,14 @@ def yahoo_finance_load(ticker):
             # Fetch 3 days of data to ensure we hit a trading day
             start_date = target_date - timedelta(days=3)
             hist = ticker_obj.history(start=start_date, end=target_date + timedelta(days=1))
+            
+            # st.write("hist",hist) #debug
+            # st.stop() #debug
             return hist['Close'].iloc[-1] if not hist.empty else None
         
         stats['price_1w_ago'] = get_hist_price(ticker, today - timedelta(days=7))
+        # st.write(stats) #debug
+        # st.stop() #debug
         # stats['price_1m_ago'] = get_hist_price(ticker, today - timedelta(days=30))
         # stats['price_6m_ago'] = get_hist_price(ticker, today - timedelta(days=180))
         # stats['price_1y_ago'] = get_hist_price(ticker, today - timedelta(days=365))
@@ -182,7 +188,7 @@ def yahoo_finance_load(ticker):
     # print(f"ss.yf_count = {ss.yf_count}") #debug
 
     # st.write(ticker_obj.info) #debug
-
+    print("exiting yahoo_finance_load function")
     return stats #, historical_prices #, historical_prices_df, companyfacts_metrics_yahoo_dict
 
 def yahoo_finance_df_format():
@@ -249,7 +255,6 @@ def yahoo_finance_df_format():
     ]
 
     companyfacts_metrics_yahoo_dict = {metric[0]: {'format': metric[1]} for metric in CompanyInfoYahoo}
-
     return companyfacts_metrics_yahoo_dict
 
 

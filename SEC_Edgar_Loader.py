@@ -993,7 +993,7 @@ def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> p
         df["date"] = pd.to_datetime(df["date"], format="%Y%m%d", errors="coerce")
         forms_upper = [f.upper() for f in forms_filter_list]
         df=df[df["form"].isin(forms_upper)].reset_index(drop=True)
-        st.write(f"{df.count()} companies reported on {current}")
+        st.write(f"{len(df)} companies reported on {current}")
         all_dfs.append(df)
         current += dt.timedelta(days=1)
 
