@@ -46,6 +46,7 @@ if "quarterly_financials" not in ss:
     ss.transaction_show_modal=False
     ss.rerun_the_application=False
     ss.columns_include_regression=False
+    ss.filters_expanded=False
     ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
     ss.filter_min_revenue_growth=0
     ss.filter_max_revenue_median=0
@@ -78,6 +79,30 @@ def safe_round(x, n=1):
 
 def safe_multiply(x, n=1):
     return x*n if isinstance(x, (int, float)) else None
+
+def reset_forms_ss_vars():
+    ss.hide_menu=ss.view_stock_analysis_form=ss.transaction_show_modal=ss.show_transaction_form=ss.qtr_data_form=ss.investment_returns_form=ss.process_yahoo_and_statistics=False
+    ss.load_sec_incremental_filings=ss.load_sec_full_filings=False
+    ss.selected_company=None
+    ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
+    ss.filter_min_revenue_growth=0
+    ss.filter_max_revenue_median=0
+    ss.filter_min_revenue_n_count=10
+    ss.filter_max_trailing_pe = 0
+    ss.filter_max_trailing_ps = 0
+    ss.filter_min_revenue_r2 = 0.0
+    ss.filter_min_revenue_growth = 0
+    ss.filter_min_income_growth = 0
+    ss.filter_min_last3_income_positive = 0
+    ss.filter_max_rev_outlier_pct = 0
+    ss.filter_min_last_filing_date = ss.temp_filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
+    ss.filter_company_and_ticker = None
+    ss.filter_industry = None
+    ss.filter_sector = None
+    ss.sort_column = 'Consolidated_Score'
+    ss.sort_direction = 'Desc'
+    ss.prev_edits={}
+    return
 
 def safe_divide(x, n=1):
     try:
@@ -922,19 +947,19 @@ def collect_data_for_company(cik):
     return results
 
 def rank_companies_by_growth_and_update_DB(cik_list):
-    print('Starting rank_companies_by_growth_and_update_DB function')
-    
     """
     Rank companies by growth consistency.
     Args: companies_dict: Dictionary with company names as keys and quarterly DataFrames as values
     Returns: results_df
     """
+    print('Starting rank_companies_by_growth_and_update_DB function')
     
     # st.write(ss.quarterly_financials)  # debug
     results = []
     
     progress_bar = st.progress(0)
     total = len(cik_list)
+    total_updated = 0
     status = st.empty()
     # error=0
     
@@ -945,8 +970,6 @@ def rank_companies_by_growth_and_update_DB(cik_list):
     # st.write(ss.quarterly_financials) # debug
     
     for i, cik in enumerate(cik_list): # :#companies_dict.items():
-        status.write(f"Processing CIK {cik} ({i+1}/{total})")
-        progress_bar.progress((i + 1) / total)
         try: 
             results_for_cik=collect_data_for_company(cik)
             # st.write("results_for_cik",results_for_cik) #debug
@@ -954,10 +977,13 @@ def rank_companies_by_growth_and_update_DB(cik_list):
                 temp_df = pd.DataFrame([results_for_cik])
                 postgres_update(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
                 results.append(results_for_cik)
-                            
+                total_updated += 1
+                print('Saved updates to DB')
         except Exception as e:
             st.write(f"Failed to append results data for {cik}: {e}")
             logging.error(f"Failed to append results data for {cik}: {e}")
+        status.write(f"Processing CIK {cik} ({i+1}/{total}, {100-safe_round(safe_multiply(safe_divide(total_updated,i),100),1)}% errors writing updates to DB)")
+        progress_bar.progress((i + 1) / total)
 
     # results_df for all companies being processed
     if isinstance(results, list) and len(results) > 0:
@@ -1470,31 +1496,6 @@ def show_regression_charts(cik):
         # st.warning(f"Regression failed: {e}")
     return()
 
-def reset_forms_ss_vars():
-    ss.hide_menu=ss.view_stock_analysis_form=ss.transaction_show_modal=ss.show_transaction_form=ss.qtr_data_form=ss.investment_returns_form=ss.process_yahoo_and_statistics=False
-    ss.load_sec_incremental_filings=ss.load_sec_full_filings=False
-    ss.selected_company=None
-    ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
-    ss.filter_min_revenue_growth=0
-    ss.filter_max_revenue_median=0
-    ss.filter_min_revenue_n_count=10
-    ss.filter_max_trailing_pe = 0
-    ss.filter_max_trailing_ps = 0
-    ss.filter_min_revenue_r2 = 0.0
-    ss.filter_min_revenue_growth = 0
-    ss.filter_min_income_growth = 0
-    ss.filter_min_last3_income_positive = 0
-    ss.filter_max_rev_outlier_pct = 0
-    ss.filter_min_last_filing_date = ss.temp_filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
-    ss.filter_company_and_ticker = None
-    ss.filter_industry = None
-    ss.filter_sector = None
-    ss.sort_column = 'Consolidated_Score'
-    ss.sort_direction = 'Desc'
-    ss.prev_edits={}
-    
-    return
-
 def update_primary_filter_session_value(key):
     temp_key = 'temp_'+key
     ss[key] = ss[temp_key]
@@ -1973,7 +1974,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         unsafe_allow_html=True,
     )
     
-    with st.expander("Expand to show filters", expanded=False):
+    with st.expander("Expand to show filters", key="temp_filters_expanded", on_change=update_primary_filter_session_value, args=("filters_expanded",)):
         col1, col2 = st.columns(2)
         with col1:
             category = st.multiselect('Which categories to include?', options=ss.categories_list,key='temp_filter_category', default=ss.filter_category, on_change=update_primary_filter_session_value, args=("filter_category",)) #default=ss.filters['category'],on_change=lambda: on_filter_change("category", ss.category)
