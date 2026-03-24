@@ -982,8 +982,10 @@ def rank_companies_by_growth_and_update_DB(cik_list):
         except Exception as e:
             st.write(f"Failed to append results data for {cik}: {e}")
             logging.error(f"Failed to append results data for {cik}: {e}")
-        status.write(f"Processing CIK {cik} ({i+1}/{total}, {100-safe_round(safe_multiply(safe_divide(total_updated,i),100),1)}% errors writing updates to DB)")
+        # st.write(f"i={i}, total={total}") #debug
+        status.write(f"Processing CIK {cik} ({i+1}/{total}, {safe_round(safe_multiply(safe_divide(total_updated,i),100),1)}% success writing updates to DB)")
         progress_bar.progress((i + 1) / total)
+        
 
     # results_df for all companies being processed
     if isinstance(results, list) and len(results) > 0:
