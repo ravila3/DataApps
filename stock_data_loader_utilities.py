@@ -122,7 +122,7 @@ def get_tickers_sec(ciks, delay=0.2):
         time.sleep(delay)
     return tickers
 
-@st.cache_data(ttl=43200) # 43200 is 12 hrs in seconds 
+@st.cache_resource(ttl='2h') # 43200 is 12 hrs in seconds 
 def yahoo_finance_load(ticker):
     print("entering into yahoo_finance_load function")
     
@@ -161,11 +161,11 @@ def yahoo_finance_load(ticker):
         # stats['price_1y_ago'] = get_hist_price(ticker, today - timedelta(days=365))
     
         # 2. Fetch Earnings Date (Existing logic)
-        earnings_df = ticker.get_earnings_dates(limit=5)
-        if earnings_df is not None and not earnings_df.empty:
-            now = pd.Timestamp.now(tz=earnings_df.index.tz)
-            future_dates = earnings_df.index[earnings_df.index >= now]
-            stats['next_earnings'] = future_dates.min() if not future_dates.empty else None
+        # earnings_df = ticker.get_earnings_dates(limit=5)
+        # if earnings_df is not None and not earnings_df.empty:
+        #     now = pd.Timestamp.now(tz=earnings_df.index.tz)
+        #     future_dates = earnings_df.index[earnings_df.index >= now]
+        #     stats['next_earnings'] = future_dates.min() if not future_dates.empty else None
             
         time.sleep(0.2)  # brief pause to avoid rate limiting
     except ValueError as e:

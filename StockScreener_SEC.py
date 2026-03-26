@@ -834,6 +834,9 @@ def collect_data_for_company(cik):
         max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
         company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
         quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
+        
+        # only run metrics if there is a new filing in the quarterly dataframe: if(quarterly_df_wc[last_modified_date]>)
+        # likely will have to run the value score on the dataframe instead of each cik. Then we can just update Yahoo and recaulculate value score using the last regression calc
         metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
         # st.write('metrics:',metrics) #debug 
 
@@ -848,7 +851,11 @@ def collect_data_for_company(cik):
         trailing_pe = clean_number(yahoo_stats.get("trailingPE"))
         trailing_ps = clean_number(yahoo_stats.get("priceToSalesTrailing12Months"))
         forward_pe = clean_number(yahoo_stats.get("forwardPE"))
-        next_earnings = yahoo_stats.get("next_earnings")
+        # last_earnings_date = yahoo_stats.get("earningsTimestamp").floor('D').to_date()
+        last_earnings_datetime = yahoo_stats.get("earningsTimestamp")
+        last_earnings_date = pd.to_datetime(last_earnings_datetime, unit="s", utc=True).tz_convert("America/Los_Angeles").date()
+        next_earnings_datetime = yahoo_stats.get("earningsTimestampStart")
+        next_earnings_date = pd.to_datetime(next_earnings_datetime, unit="s", utc=True).tz_convert("America/Los_Angeles").date()
         price_1w_ago = clean_number(safe_round(yahoo_stats.get("price_1w_ago"),2))
         pct_chg_from_1w_ago = safe_round(safe_divide(stock_price,price_1w_ago)*100-100,1)
         # st.write(f"pct_chg_from_1w_ago={pct_chg_from_1w_ago}, price_1w_ago={price_1w_ago}") #debug
@@ -857,7 +864,7 @@ def collect_data_for_company(cik):
         # price_1y_ago = yahoo_stats.get("price_1y_ago")
         stock_price_update_datetime=pd.Timestamp.now(tz="UTC").floor('min')
 
-        # st.write(company_and_ticker, trailing_pe,forward_pe,trailing_ps,next_earnings,price_1wk_ago,price_1mo_ago) #debug
+        # st.write(company_and_ticker, trailing_pe,forward_pe,trailing_ps,last_earnings_date,price_1wk_ago,price_1mo_ago) #debug
         # st.json(yahoo_stats) #debug
         # st.stop()
 
@@ -923,7 +930,8 @@ def collect_data_for_company(cik):
         'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
         'last_filing_date': last_filing_date,
         'max_report_date': max_report_date,
-        'next_earnings': next_earnings,
+        'last_earnings_date': last_earnings_date,
+        'next_earnings_date': next_earnings_date,
         'stock_price_update_datetime': stock_price_update_datetime,
         'price_1w_ago': price_1w_ago,
         'pct_chg_from_1w_ago': pct_chg_from_1w_ago,
@@ -971,6 +979,8 @@ def rank_companies_by_growth_and_update_DB(cik_list):
     
     for i, cik in enumerate(cik_list): # :#companies_dict.items():
         try: 
+            progress_bar.progress((i+1) / total)
+            status.write(f"Processing CIK {cik} ({i+1}/{total}, {safe_round(safe_multiply(safe_divide(total_updated+1,i+1),100),1)}% success writing updates to DB)")
             results_for_cik=collect_data_for_company(cik)
             # st.write("results_for_cik",results_for_cik) #debug
             if results_for_cik != None:
@@ -983,9 +993,6 @@ def rank_companies_by_growth_and_update_DB(cik_list):
             st.write(f"Failed to append results data for {cik}: {e}")
             logging.error(f"Failed to append results data for {cik}: {e}")
         # st.write(f"i={i}, total={total}") #debug
-        status.write(f"Processing CIK {cik} ({i+1}/{total}, {safe_round(safe_multiply(safe_divide(total_updated,i),100),1)}% success writing updates to DB)")
-        progress_bar.progress((i + 1) / total)
-        
 
     # results_df for all companies being processed
     if isinstance(results, list) and len(results) > 0:
@@ -1145,6 +1152,8 @@ def write_sec_data_into_db(load_type):
         .sort_values("company_and_ticker")
     )
     
+    cik_list = []
+    
     if load_type == 'full':
         cik_list = ss.company_lookup_df['cik'].tolist()
         # cik_list=cik_list[6000:] #[:2] - limit to first 2 CIKs for testing
@@ -1171,6 +1180,31 @@ def write_sec_data_into_db(load_type):
 
         st.write('SEC Filings to Load',filtered_sec_filings)
         cik_list=filtered_sec_filings['cik'].to_list()
+
+        # Now get list of companies that Yahoo says will have earnings reported (to get timely data instead of next day)
+        df = stock_growth_analysis_df.copy()
+        df['last_filing_date'] = pd.to_datetime(df['last_filing_date'], errors='coerce', utc=True)
+        df['last_earnings_date'] = pd.to_datetime(df['last_earnings_date'], errors='coerce', utc=True)
+
+        # reference now in UTC (or choose a timezone you prefer)
+        now_utc = pd.Timestamp.now(tz="UTC")
+
+        # build mask: filing < earnings, earnings not null, and earnings within last 7 days (inclusive)
+        seven_days_ago = now_utc - pd.Timedelta(days=7)
+        mask = (
+            df['last_filing_date'].notna()
+            & df['last_earnings_date'].notna()
+            & (df['last_filing_date'] < df['last_earnings_date'])
+            & (df['last_earnings_date'] >= seven_days_ago)
+            & (df['last_earnings_date'] <= now_utc)
+        )
+
+        # get unique CIKs and append to existing list (avoid duplicates)
+        new_ciks = df.loc[mask, 'cik'].dropna().astype(str).unique().tolist()
+        cik_list += [c for c in new_ciks if c not in cik_list]
+        st.write(f'new_ciks based on Yahoo earnings timestamp = {new_ciks}') #debug
+        # st.stop()
+
         # cik_list=['0001341439'] #debug
         print('Got list of cik to update for incremental load')
     
@@ -1510,15 +1544,15 @@ def show_investment_returns():
     print("entering into show_investment_returns function")
     transactions_df=load_stock_transactions_from_db()
     ss.rankings_df=load_stock_growth_analysis_data_from_db()
-    transactions_df = transactions_df.merge(
-        ss.rankings_df[['cik', 'stock_price']], on='cik', how='left'
+    transaction_profit_df = transactions_df.merge(
+        ss.rankings_df[['cik', 'ticker', 'stock_price']], on='cik', how='left'
         ).rename(columns={'stock_price': 'current_price'})
     
     # --- Build investment_returns_df from transactions_df and rankings_df ---
 
     # Split buys and sells
-    buys  = transactions_df[transactions_df['action'] == 'Buy'].copy()
-    sells = transactions_df[transactions_df['action'] == 'Sell'].copy()
+    buys  = transaction_profit_df[transaction_profit_df['action'] == 'Buy'].copy()
+    sells = transaction_profit_df[transaction_profit_df['action'] == 'Sell'].copy()
 
     buys['purchase_quantity'] = buys['quantity']
     buys['purchase_amount']   = buys['total']
@@ -1527,14 +1561,14 @@ def show_investment_returns():
     sells['sold_amount']   = sells['total']
 
     # Aggregate buys
-    buy_summary = buys.groupby(['cik', 'company_and_ticker']).agg(
+    buy_summary = buys.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
         purchase_quantity=('purchase_quantity', 'sum'),
         purchase_amount=('purchase_amount', 'sum'),
         first_purchase_date=('date', 'min')   # needed for returns
     ).reset_index()
 
     # Aggregate sells
-    sell_summary = sells.groupby(['cik', 'company_and_ticker']).agg(
+    sell_summary = sells.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
         sold_quantity=('sold_quantity', 'sum'),
         sold_amount=('sold_amount', 'sum')
     ).reset_index()
@@ -1542,10 +1576,10 @@ def show_investment_returns():
     # Merge buy + sell summaries
     investment_returns_df = (
         buy_summary
-        .merge(sell_summary, on=['cik', 'company_and_ticker'], how='left')
+        .merge(sell_summary, on=['cik', 'ticker', 'company_and_ticker'], how='left')
         .fillna({'sold_quantity': 0, 'sold_amount': 0})
     )
-
+    
     # Average purchase price
     investment_returns_df['avg_purchase_price'] = (
         investment_returns_df['purchase_amount'] /
@@ -1704,7 +1738,7 @@ def show_investment_returns():
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
-    investment_returns_df = investment_returns_df[['company_and_ticker','purchase_amount','current_holdings_value','total_gains','total_return_pct','realized_gains','unrealized_gains','months_held','purchase_quantity','first_purchase_date','avg_purchase_price','current_holdings','current_price']]
+    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount','current_holdings','current_holdings_value','total_gains','total_return_pct','realized_gains','unrealized_gains','months_held','purchase_quantity','first_purchase_date','avg_purchase_price','current_price']]
 
     def highlight_total_row(row):
         if row["company_and_ticker"] == "TOTAL":
@@ -1713,7 +1747,7 @@ def show_investment_returns():
 
     styled_df = (
         investment_returns_df.style
-            .applymap(color_gains, subset=['total_gains',"realized_gains","unrealized_gains","total_return_pct"])
+            .map(color_gains, subset=['total_gains',"realized_gains","unrealized_gains","total_return_pct"])
             .apply(highlight_total_row, axis=1)
             .format(fmt)
     )
@@ -1727,66 +1761,126 @@ def show_investment_returns():
                  )
     st.write("")
 
-########################################################################################
+    ########################################################################################
+    # 1. Define the callback to handle database sync
+    def sync_database():
+        state = st.session_state.my_editor
+        
+        # Handle Deletions
+        for row_idx in state['deleted_rows']:
+            row = st.session_state.transaction_df.iloc[row_idx]
+            postgres_delete_single_transaction(row)
+            st.toast(f"Deleted row {row_idx}")
+
+        # Handle Additions
+        for row_dict in state['added_rows']:
+            new_row_df = pd.DataFrame([row_dict])
+            postgres_update(new_row_df, "stock_transactions", 
+                            primary_key_columns=["cik", "date", "action"])
+            st.toast("New transaction added.")
+
+        # Handle Edits
+        for row_idx, updated_values in state['edited_rows'].items():
+            # Get the original row and update it with the new values
+            row = st.session_state.transaction_df.iloc[row_idx].copy()
+            for col, val in updated_values.items():
+                row[col] = val
+            
+            postgres_update(pd.DataFrame([row]), "stock_transactions",
+                            primary_key_columns=["cik", "date", "action"])
+            st.toast(f"Updated row {row_idx}")
+
+    # 2. Render the Editor
     st.subheader('Transactions to date for viewing/editing:')
-    ss.transaction_df = transactions_df
 
-    if "transaction_df_prev" not in ss:
-        ss.transaction_df_prev = ss.transaction_df.copy()
+    # Ensure the DF is in session state
+    if "transaction_df" not in st.session_state:
+        st.session_state.transaction_df = transactions_df
 
-    edited_df = st.data_editor(
-        ss.transaction_df,
+    st.data_editor(
+        st.session_state.transaction_df,
         num_rows="dynamic",
-        column_config= {
-            'quantity': st.column_config.NumberColumn(label="Quantity", step='int'),
-            'price': st.column_config.NumberColumn(label="Price", format='dollar'),
-            'total': st.column_config.NumberColumn(label="Total Amount", format='dollar')
-            },
+        column_config={
+            'quantity': st.column_config.NumberColumn("Quantity", step=1),
+            'price': st.column_config.NumberColumn("Price", format="$%.2f"),
+            'total': st.column_config.NumberColumn("Total Amount", format="$%.2f")
+        },
         hide_index=True,
+        key="my_editor",
+        on_change=sync_database # This runs only when a change is committed
     )
+    # st.subheader('Transactions to date for viewing/editing:')
+    # ss.transaction_df = transactions_df
 
-    # -----------------------------
-    # DETECT DELETIONS
-    # -----------------------------
-    deleted_rows = ss.transaction_df_prev[
-        ~ss.transaction_df_prev.apply(tuple, 1).isin(edited_df.apply(tuple, 1))
-    ]
+    # if "transaction_df_prev" not in ss:
+    #     ss.transaction_df_prev = ss.transaction_df.copy()
 
-    for _, row in deleted_rows.iterrows():
-        postgres_delete_single_transaction(row)
-        st.toast("Transaction deleted.")
+    # edited_df = st.data_editor(
+    #     ss.transaction_df,
+    #     num_rows="dynamic",
+    #     column_config= {
+    #         'quantity': st.column_config.NumberColumn(label="Quantity", step='int'),
+    #         'price': st.column_config.NumberColumn(label="Price", format='dollar'),
+    #         'total': st.column_config.NumberColumn(label="Total Amount", format='dollar')
+    #         },
+    #     hide_index=True,
+    # )
 
-    # -----------------------------
-    # DETECT ADDITIONS
-    # -----------------------------
-    new_rows = edited_df[
-        ~edited_df.apply(tuple, 1).isin(ss.transaction_df_prev.apply(tuple, 1))
-    ]
+    # # -----------------------------
+    # # DETECT DELETIONS
+    # # -----------------------------
+    # deleted_rows = ss.transaction_df_prev[
+    #     ~ss.transaction_df_prev.apply(tuple, 1).isin(edited_df.apply(tuple, 1))
+    # ]
 
-    for _, row in new_rows.iterrows():
-        postgres_update(pd.DataFrame([row]), "stock_transactions",
-                        primary_key_columns=["cik", "date", "action"])
-        st.toast("New transaction added.")
+    # for _, row in deleted_rows.iterrows():
+    #     postgres_delete_single_transaction(row)
+    #     st.toast("Transaction deleted.")
 
-    # -----------------------------
-    # DETECT MODIFICATIONS
-    # -----------------------------
-    merged = edited_df.merge(ss.transaction_df_prev, indicator=True, how="outer")
-    modified = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
+    # # -----------------------------
+    # # DETECT ADDITIONS
+    # # -----------------------------
+    # new_rows = edited_df[
+    #     ~edited_df.apply(tuple, 1).isin(ss.transaction_df_prev.apply(tuple, 1))
+    # ]
 
-    for _, row in modified.iterrows():
-        postgres_update(pd.DataFrame([row]), "stock_transactions",
-                        primary_key_columns=["cik", "date", "action"])
-        st.toast("Transaction updated.")
+    # for _, row in new_rows.iterrows():
+    #     postgres_update(pd.DataFrame([row]), "stock_transactions",
+    #                     primary_key_columns=["cik", "date", "action"])
+    #     st.toast("New transaction added.")
 
-    # -----------------------------
-    # UPDATE SESSION STATE
-    # -----------------------------
-    ss.transaction_df = edited_df
-    ss.transaction_df_prev = edited_df.copy()
+    # # -----------------------------
+    # # DETECT MODIFICATIONS
+    # # -----------------------------
+    # merged = edited_df.merge(ss.transaction_df_prev, indicator=True, how="outer")
+    # modified = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
 
-    st.stop()
+    # for _, row in modified.iterrows():
+    #     postgres_update(pd.DataFrame([row]), "stock_transactions",
+    #                     primary_key_columns=["cik", "date", "action"])
+    #     st.toast("Transaction updated.")
 
+    # # -----------------------------
+    # # UPDATE SESSION STATE
+    # # -----------------------------
+    # ss.transaction_df = edited_df
+    # ss.transaction_df_prev = edited_df.copy()
+
+    # # after computing deleted_rows, new_rows, modified and after updating ss.transaction_df / ss.transaction_df_prev
+    # has_changes = any(not df.empty for df in (deleted_rows, new_rows, modified))
+    
+    # if has_changes:
+    #     st.write(has_changes, deleted_rows, new_rows, modified) #debug
+    #     st.stop()
+    #     ss.transaction_df = edited_df
+    #     ss.transaction_df_prev = edited_df.copy()
+    #     deleted_rows = pd.DataFrame(columns=ss.transaction_df_prev.columns)
+    #     new_rows = pd.DataFrame(columns=ss.transaction_df_prev.columns)
+    #     modified = pd.DataFrame(columns=ss.transaction_df_prev.columns)
+    # else:
+    #     # nothing changed; stop this run
+    #     st.stop()
+        
 def reset_show_modal():
     ss.transaction_show_modal = False
 
@@ -1852,11 +1946,11 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['stock_price', # 'price_range_52wks',
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','curr_value','stock_price', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-        'last_filing_date','next_earnings','stock_price_update_datetime',
+        'last_filing_date','last_earnings_date','stock_price_update_datetime',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers']
@@ -1871,6 +1965,46 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         }
         ss.rankings_df = stock_growth_analysis_df.rename(columns=rename_map)
         
+        # integrate transaction quantities
+        tx=load_stock_transactions_from_db()
+        
+        # 1) Defensive copy and normalization
+        tx['action'] = tx['action'].astype(str).str.strip().str.lower()   # normalize action values
+        tx['quantity'] = pd.to_numeric(tx['quantity'], errors='coerce').fillna(0)  # numeric quantities
+
+        # 2) Pivot/aggregate: sum quantity by cik x action
+        agg = (
+            tx.pivot_table(
+                index='cik',
+                columns='action',
+                values='quantity',
+                aggfunc='sum',
+                fill_value=0
+            )
+            .rename(columns={'buy': 'buy_quantity', 'sell': 'sell_quantity'})
+            .reset_index()
+        )
+
+        # Ensure both columns exist (in case there were only buys or only sells)
+        for col in ('buy_quantity', 'sell_quantity'):
+            if col not in agg.columns:
+                agg[col] = 0.0
+
+        # 3) Compute curr_quantity
+        agg['curr_quantity'] = agg['buy_quantity'] - agg['sell_quantity']
+
+        # 4) Merge into rankings_df by cik
+        ss.rankings_df = (
+            ss.rankings_df
+            .merge(agg, on='cik', how='left')
+        )
+        ss.rankings_df[['curr_quantity']] = (
+            ss.rankings_df[['curr_quantity']]
+            .fillna(0)
+        )
+        
+        ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
+
         # st.write(f"the len(ss.rankings_df) is {len(ss.rankings_df)}") #debug
 
         editable_stock_data=read_or_create_editable_table()
@@ -1880,7 +2014,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         # st.dataframe(editable_stock_growth_analysis_df) # debug     
         ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.sort_values(by='Consolidated_Score', ascending=False)
         # st.write(f"the len(ss.editable_stock_growth_analysis_df) is {len(ss.editable_stock_growth_analysis_df)}") #debug
-            
+                    
     @st.cache_data
     def compute_quantiles(df, cols):
         breakpoints = [0.2, 0.4, 0.6, 0.8]
@@ -2048,7 +2182,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     sort_columns=['Consolidated_Score','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago', 'industry', 'sector',
         'Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-        'last_filing_date','next_earnings','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
+        'last_filing_date','last_earnings_date','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -2075,7 +2209,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     
     # ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
     # st.write(f"ss.sort_column={ss.sort_column}") #ss.editable_stock_growth_analysis_df) #debug
-    
+        
+    # st.write(ss.editable_stock_growth_analysis_df) #debug
     ss.filtered_df = (
         ss.editable_stock_growth_analysis_df
             .loc[mask,[c for c in columns if c in ss.editable_stock_growth_analysis_df.columns]]
@@ -2083,7 +2218,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             .reset_index(drop=True)
             .copy()
     )
-    
+        
     with color_button('blue'):
         update_yahoo_and_stats_btn = st.button('Hit this button to update Yahoo Stock Data for CURRENTLY SELECTED Stocks (only when stock price needs updating or selection widens)')
 
@@ -2193,6 +2328,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width=100),
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
+                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", format='%.0f', width="small"),
+                'curr_value':st.column_config.NumberColumn(label="Curr Value", format='dollar', step='int', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 # 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
