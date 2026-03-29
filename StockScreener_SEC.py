@@ -96,7 +96,7 @@ def reset_forms_ss_vars():
     ss.filter_min_income_growth = 0
     ss.filter_min_last3_income_positive = 0
     ss.filter_max_rev_outlier_pct = 0
-    ss.filter_min_last_filing_date = ss.temp_filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
+    ss.filter_min_last_filing_date = ss.filter_min_last_filing_date= (datetime.today() + timedelta(days=1)).date()
     ss.filter_company_and_ticker = None
     ss.filter_industry = None
     ss.filter_sector = None
@@ -2449,8 +2449,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         with col1:
             category = st.multiselect('Which categories to include?', options=ss.categories_list,key='temp_filter_category', default=ss.filter_category, on_change=update_primary_filter_session_value, args=("filter_category",)) #default=ss.filters['category'],on_change=lambda: on_filter_change("category", ss.category)
             max_revenue_median = st.number_input("Max Revenue Median? (0 = No Filter)", value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1), min_value=0, step=1000000, format="%d", on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",)) # max_value=int(ss.editable_stock_growth_analysis_df['Revenue_Growth_Median'].max() + 1, on_change=update_primary_filter_session_value, args=("filter_min_revenue_growth",))
-            max_trailing_pe = st.number_input("Max trailing PE (0 = No Filter)?", key='filter_max_trailing_pe', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_pe",))
-            max_trailing_ps = st.number_input("Max trailing PS (0 = No Filter)?", key='filter_max_trailing_ps', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_ps",))
+            max_trailing_pe = st.number_input("Max trailing PE (0 = No Filter)?", key='temp_filter_max_trailing_pe', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_pe",))
+            max_trailing_ps = st.number_input("Max trailing PS (0 = No Filter)?", key='temp_filter_max_trailing_ps', min_value=0, max_value=300, step=10, format="%d", on_change=update_primary_filter_session_value, args=("filter_max_trailing_ps",))
             min_last_filing_date = st.date_input("Min Last Filing Date (set to future date to ignore)?",key='temp_filter_min_last_filing_date', on_change=update_primary_filter_session_value, args=("filter_min_last_filing_date",))
             
         with col2:
