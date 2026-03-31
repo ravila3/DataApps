@@ -349,444 +349,460 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     """
     print('Starting analyze_yoy_growth function')
     
-    if quarterly_df.empty or len(quarterly_df) < 8:  # Need at least 2 years of data
-        return quarterly_df, None
-    
-    # Ensure fiscal_timeframe column exists
-    if 'fiscal_timeframe' not in quarterly_df.columns:
-        return quarterly_df, None
-    
-    # Create a working dataframe with fiscal_timeframe
-    quarterly_df_wc = quarterly_df.reset_index(drop=True).copy()
-    quarterly_df_wc['fiscal_timeframe'] = quarterly_df_wc['fiscal_timeframe'].astype(str)
-    quarterly_df_wc = quarterly_df_wc.sort_values(by='fiscal_timeframe', ascending=True).reset_index(drop=True)
-       
-    # Parse fiscal_timeframe to extract year and quarter
-    def parse_fiscal_timeframe(tf_str):
-        """Parse '2025 Q1' format to (year, quarter)"""
-        try:
-            parts = tf_str.strip().split()
-            year = int(parts[0])
-            quarter = int(parts[1].replace('Q', ''))
-            return (year, quarter)
-        except:
-            return None
-    
-    quarterly_df_wc['year_quarter'] = quarterly_df_wc['fiscal_timeframe'].apply(parse_fiscal_timeframe)
-    quarterly_df_wc = quarterly_df_wc[quarterly_df_wc['year_quarter'].notna()]  # Remove rows with invalid fiscal_timeframe
-    
-    # st.write(quarterly_df_wc) #debug
-    
-    if len(quarterly_df_wc) < 8:
-        return quarterly_df, None
-    
-    metrics = {
-        'revenue_growth': {},
-        'revenue_growth_list': [],
-        'income_growth': {},
-        'income_growth_list': [],
-        'income_values_list': [],
-        'margin_growth': {},
-        'margin_growth_list': [],
-        'margin_values': [],
-        'revenue_consistency_score': 0,
-        'income_consistency_score': 0,
-        'last_3q_revenue_growth': 0,
-        'last_3q_income_growth': 0,
-        'last_3q_margin_growth': 0,
-        'last_3q_income_positive_count': 0,
-        'last_3q_income_growth_positive_count': 0,
-        'last_6q_revenue_median': 0,
-        'last_6q_income_median': 0,
-        'median_revenue_growth': 0,
-        'median_income_growth': 0,
-        'median_margin_growth': 0,
-        'last_3q_median_margin': 0,
-        'revenue_median': 0,
-        'revenue_growth_slope': 0,
-        'revenue_growth_median': 0,
-        'revenue_growth_pct': 0,
-        'revenue_n': 0,
-        'revenue_n_outliers': 0,
-        'revenue_outlier_pct': 0,
-        'revenue_r2': 0,
-        'revenue_avg_residual_last3': 0,
-        'income_median': 0,
-        'income_growth_slope': 0,
-        'income_growth_median': 0,
-        'income_growth_pct': 0,
-        'income_n': 0,
-        'income_n_outliers': 0,
-        'income_outlier_pct': 0,
-        'income_r2': 0,
-        'income_avg_residual_last3': 0,
-        'margin_median': 0,
-        'margin_growth_slope': 0,
-        'margin_growth_median': 0,
-        'margin_slope_pct': 0,
-        'margin_n': 0,
-        'margin_n_outliers': 0,
-        'margin_outlier_pct': 0,
-        'margin_r2': 0,
-        'margin_avg_residual_last3': 0
-    }
-
-    # st.dataframe(quarterly_df_wc)  # debug
-
-    # Add growth columns to the original dataframe
-    result_df = quarterly_df.copy()
-    result_df['Revenue_YoY_Growth_PCT'] = np.nan
-    result_df['Income_YoY_Growth_PCT'] = np.nan
-    result_df['Margin_YoY_Growth_PCT'] = np.nan
-    result_df['Margin_PCT'] = np.nan
-    
-    min_year=2020
-    
-    # Calculate and store margin values for all quarters
-    if 'Net Income' in quarterly_df_wc.columns and 'Revenue/Sales' in quarterly_df_wc.columns:
-        fiscal_str = quarterly_df_wc['fiscal_timeframe'].tolist()
-        end_date = quarterly_df_wc['end_date'].tolist()
-        revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
-        income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
-        metrics['last_6q_revenue_median'] = revenue_values.tail(6).median()
-        metrics['last_6q_income_median'] = income_values.tail(6).median()
-        metrics['revenue_median'] = revenue_values.median()
-        metrics['income_median'] = income_values.median()
-        
-        for i in range(len(quarterly_df_wc)):
-            if pd.notna(income_values.iloc[i]) and pd.notna(revenue_values.iloc[i]) and revenue_values.iloc[i] > 0:
-                margin = (income_values.iloc[i] / revenue_values.iloc[i]) * 100
-                fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
-                metrics['margin_values'].append(margin)
-                result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Margin_PCT'] = margin
-    
-    # Calculate YoY growth for Revenue/Sales
-    if 'Revenue/Sales' in quarterly_df_wc.columns:
-        revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
-        
-        for i in range(len(quarterly_df_wc)):
-            current_year, current_q = quarterly_df_wc.loc[i, 'year_quarter']
-            prior_year = current_year - 1
-            
-            # Find the corresponding quarter from prior year
-            prior_row = quarterly_df_wc[(quarterly_df_wc['year_quarter'].apply(lambda x: x[0] == prior_year and x[1] == current_q))]
-            
-            if not prior_row.empty and pd.notna(revenue_values.iloc[i]):
-                prior_idx = prior_row.index[0]
-                prior_value = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Revenue/Sales'], errors='coerce')
-                current_value = revenue_values.iloc[i]
-                
-                if pd.notna(prior_value) and prior_value > 0:
-                    growth = ((current_value - prior_value) / prior_value) * 100
-                    fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
-                    if int(fiscal_str[:4])>=min_year:
-                        metrics['revenue_growth'][fiscal_str] = growth
-                        metrics['revenue_growth_list'].append(growth)
-                    # Update the result dataframe
-                    result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Revenue_YoY_Growth_PCT'] = growth
-                    # st.write(f"Revenue Growth for {fiscal_str}: {growth:.2f}%")  # debug
-    
-    # Calculate YoY growth for Net Income
-    if 'Net Income' in quarterly_df_wc.columns:
-        income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
-        
-        for i in range(len(quarterly_df_wc)):
-            current_year, current_q = quarterly_df_wc.loc[i, 'year_quarter']
-            prior_year = current_year - 1
-            
-            # Find the corresponding quarter from prior year
-            prior_row = quarterly_df_wc[(quarterly_df_wc['year_quarter'].apply(lambda x: x[0] == prior_year and x[1] == current_q))]
-            
-            if not prior_row.empty and pd.notna(income_values.iloc[i]):
-                prior_idx = prior_row.index[0]
-                prior_value = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Net Income'], errors='coerce')
-                current_value = income_values.iloc[i]
-                
-                if pd.notna(prior_value) and prior_value != 0:
-                    growth = ((current_value - prior_value) / abs(prior_value)) * 100
-                    fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
-                    if int(fiscal_str[:4])>=min_year:
-                        metrics['income_growth'][fiscal_str] = growth
-                        metrics['income_growth_list'].append(growth)
-                        metrics['income_values_list'].append(current_value)
-                    # Update the result dataframe
-                    result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Income_YoY_Growth_PCT'] = growth
-    
-    # Calculate YoY growth for Margin (Net Income / Revenue)
-    if 'Net Income' in quarterly_df_wc.columns and 'Revenue/Sales' in quarterly_df_wc.columns:
-        income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
-        revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
-        margin_values = (income_values / revenue_values * 100).fillna(0)
-        
-        for i in range(len(quarterly_df_wc)):
-            current_year, current_q = quarterly_df_wc.loc[i, 'year_quarter']
-            prior_year = current_year - 1
-            
-            # Find the corresponding quarter from prior year
-            prior_row = quarterly_df_wc[(quarterly_df_wc['year_quarter'].apply(lambda x: x[0] == prior_year and x[1] == current_q))]
-            
-            if not prior_row.empty and pd.notna(income_values.iloc[i]) and pd.notna(revenue_values.iloc[i]):
-                prior_idx = prior_row.index[0]
-                prior_revenue = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Revenue/Sales'], errors='coerce')
-                prior_income = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Net Income'], errors='coerce')
-                current_revenue = revenue_values.iloc[i]
-                current_income = income_values.iloc[i]
-                def normalize_margin(x):
-                    if x is None or (isinstance(x, float) and np.isnan(x)):
-                        return np.nan
-                    return float(x)
-
-                def safe_margin(income, revenue):
-                    if revenue is None or revenue == 0 or np.isnan(revenue):
-                        return None
-                    return (income / revenue) * 100
-                
-                current_margin = None
-                prior_margin = None
-                
-                if pd.notna(prior_revenue) and prior_revenue > 0 and pd.notna(prior_income):
-                    current_margin = safe_margin(current_income, current_revenue)
-                    prior_margin   = safe_margin(prior_income, prior_revenue)
-                    current_margin = normalize_margin(current_margin)
-                    prior_margin   = normalize_margin(prior_margin)
-
-                    if np.isnan(current_margin) or np.isnan(prior_margin):
-                        margin_growth = np.nan
-                    else:
-                        margin_growth = current_margin - prior_margin
-
-                    margin_growth = current_margin - prior_margin
-                    
-                    fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
-                    if int(fiscal_str[:4])>=min_year:
-                        metrics['margin_growth'][fiscal_str] = margin_growth
-                        metrics['margin_growth_list'].append(margin_growth)
-                    # Update the result dataframe
-                    result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Margin_YoY_Growth_PCT'] = margin_growth
-    
-    # Calculate consistency metrics
-    if metrics['revenue_growth_list']:
-        revenue_growths = metrics['revenue_growth_list']
-        result_df = result_df[result_df["fiscal_timeframe"].str[:4].astype(int) >= min_year] #filter to min_year
-
-        # st.write(metrics) #debug
-        metrics['median_revenue_growth'] = np.median(revenue_growths)
-
-        # Consistency score: positive growth with low volatility
-        metrics['revenue_consistency_score'] = len([g for g in revenue_growths if g > 0]) / len(revenue_growths) * 100
-        
-        # Last 3 quarters average
-        if len(revenue_growths) >= 3:
-            metrics['last_3q_revenue_growth'] = np.median(revenue_growths[-3:])
-        elif len(revenue_growths) > 0:
-            metrics['last_3q_revenue_growth'] = np.median(revenue_growths)
-        
-    if plot_regression_bin==1:
-        col1, col2 = st.columns([1,2])
-        with col1:
-            ticker=quarterly_df['ticker'].iloc[0]
-            url = f"https://finance.yahoo.com/quote/{ticker}/"
-            st.write("Click this for the Yahoo Finance Page (%s)" % url)
-        with col2:
-            remove_outliers = st.toggle("Remove outliers", value=False)
-    else:
-        remove_outliers=True
-
-        # Linear regression for revenue growth trend
-        # st.write(revenue_values)  # debug
-    if len(revenue_values) >= 6:
-        try:
-            # st.write(len(revenue_values),len(end_date)) #debug
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue, regression_update_datetime = perform_regression(name, "Revenue", revenue_values, end_date, plot_regression_bin,remove_outliers)
-            metrics['revenue_r2'] = r2
-            metrics['revenue_growth_slope'] = safe_round(slope, 1)
-            metrics['revenue_growth_median'] = median
-            metrics['revenue_growth_pct'] = safe_round(metrics['revenue_growth_slope'] * 100 / (metrics['last_6q_revenue_median'] if metrics['last_6q_revenue_median'] != 0 else 1), 2) if 'revenue_growth_slope' in metrics and 'last_6q_revenue_median' in metrics else 0
-            metrics['revenue_n'] = n
-            metrics['revenue_n_outliers'] = n_outliers
-            metrics['revenue_outlier_pct'] = safe_round(metrics['revenue_n_outliers'] / metrics['revenue_n'] * 100, 2) if metrics['revenue_n'] > 0 else 0
-            metrics['revenue_avg_residual_last3'] = avg_residual_last3
-            metrics['regression_update_datetime'] = regression_update_datetime
-        except Exception as e:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue, regression_update_datetime = 0, 0, 0, 0, 0, 0, 0, 0, None, None
-            st.write(f"Regression failed for Revenue on company {name} due to {e}")
-   
-    if metrics['income_growth_list']:
-        # st.write(metrics['income_values_list'],metrics['income_growth_list']) #debug
-        income_growths = metrics['income_growth_list']
-        metrics['median_income_growth'] = np.median(income_growths)
-        # income_values_list = metrics['income_values_list']
-        # Income growth consistency
-        metrics['income_consistency_score'] = len([g for g in income_growths if g > 0]) / len(income_growths) * 100
-        metrics['last_3q_income_growth_positive_count'] = len([g for g in income_growths[-3:] if g > 0]) if len(income_growths) >= 3 else len([g for g in income_growths if g > 0])
-        metrics['last_3q_income_positive_count'] = len([g for g in income_values[-3:] if g > 0]) if len(income_values) >= 3 else len([g for g in income_values if g > 0])
-        
-        # Last 3 quarters average
-        if len(income_growths) >= 3:
-            metrics['last_3q_income_growth'] = np.median(income_growths[-3:])
-        elif len(income_growths) > 0:
-            metrics['last_3q_income_growth'] = np.median(income_growths)
-        
-        # Linear regression for income growth trend
-    if len(income_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
-        try:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income, regression_update_datetime = perform_regression(name, "Income", income_values, end_date, plot_regression_bin, remove_outliers)
-            metrics['income_growth_slope'] = safe_round(slope, 1)
-            metrics['income_r2'] = r2
-            metrics['income_growth_median'] = median
-            metrics['income_growth_pct'] = safe_round(metrics['income_growth_slope'] * 100 / max(abs(metrics['last_6q_income_median']),abs(metrics['income_median'])) if metrics['last_6q_income_median'] != 0 else 1, 2) if 'income_growth_slope' in metrics and 'last_6q_income_median' in metrics else 0
-            metrics['income_n'] = n
-            metrics['income_n_outliers'] = n_outliers
-            metrics['income_outlier_pct'] = safe_round(metrics['income_n_outliers'] / metrics['income_n'] * 100, 2) if metrics['income_n'] > 0 else 0
-            metrics['income_avg_residual_last3'] = avg_residual_last3
-            metrics['regression_update_datetime'] = regression_update_datetime
-        except Exception as e:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income, regression_update_datetime = 0, 0, 0, 0, 0, 0, 0, 0, None, None
-            st.write(f"Regression failed for Income for company {name} due to {e}")
-        
-    if metrics['margin_growth_list']:
-        margin_growths = metrics['margin_growth_list']
-        metrics['median_margin_growth'] = np.median(margin_growths)
-        
-        # Last 3 quarters average
-        if len(margin_growths) >= 3:
-            metrics['last_3q_margin_growth'] = np.median(margin_growths[-3:])
-        elif len(margin_growths) > 0:
-            metrics['last_3q_margin_growth'] = np.median(margin_growths)
-        
-    # Linear regression for margin growth trend
-    if len(margin_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
-        try:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin, regression_update_datetime = perform_regression(name, "Margin", margin_values, end_date, plot_regression_bin, remove_outliers)
-            metrics['margin_r2'] = r2
-            metrics['margin_growth_slope'] = safe_round(slope, 1)
-            metrics['margin_avg_residual_last3'] = avg_residual_last3
-            metrics['margin_growth_median'] = median
-            metrics['margin_growth_pct'] = safe_round(metrics['margin_growth_slope'] * 100 / abs(metrics['margin_growth_median'] if metrics['margin_growth_median'] != 0 else 1), 2) if 'margin_growth_slope' in metrics and 'margin_growth_median' in metrics else 0
-            metrics['margin_n'] = n
-            metrics['margin_n_outliers'] = n_outliers
-            metrics['margin_outlier_pct'] = safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0
-            metrics['regression_update_datetime'] = regression_update_datetime
-        except Exception as e:
-            slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin, regression_update_datetime = 0, 0, 0, 0, 0, 0, 0, 0, None, None
-            st.write(f"Regression failed for Margin for company {name} due to {e}")
-    
-    # Calculate average margin and last 3 quarters average margin
-    if metrics['margin_values']:
-        margin_values = metrics['margin_values']
-        metrics['margin_median'] = np.median(margin_values)
-        
-        # Last 3 quarters average margin
-        if len(margin_values) >= 3:
-            metrics['last_3q_median_margin'] = np.median(margin_values[-3:])
-        elif len(margin_values) > 0:
-            metrics['last_3q_median_margin'] = np.median(margin_values)
-
-    # update DB
     try:
-        cik = quarterly_df['cik'].max()
-        metrics_to_update=({
-            'cik':cik,
-            'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
-            'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
-            'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
-            'Median_Income_Growth_PCT': safe_round(metrics['median_income_growth'], 2),
-            'Median_Margin_Growth_PCT': safe_round(metrics['median_margin_growth'], 2),
-            'Median_Margin_PCT': safe_round(metrics['margin_median'], 2),
-            'Last3Q_Revenue_Growth_PCT': safe_round(metrics['last_3q_revenue_growth'], 2),
-            'Last3Q_Income_Growth_PCT': safe_round(metrics['last_3q_income_growth'], 2),
-            'Last3Q_Margin_Growth_PCT': safe_round(metrics['last_3q_margin_growth'], 2),
-            'Last3Q_Median_Margin_PCT': safe_round(metrics['last_3q_median_margin'], 2),
-            'Last3Q_Income_Positive': int(metrics['last_3q_income_positive_count']),
-            'Last6Q_Revenue_Median': safe_round(metrics['last_6q_revenue_median'],0),
-            'Last6Q_Income_Median': safe_round(metrics['last_6q_income_median'],0),
-            'Revenue_Growth_Count': len(metrics['revenue_growth']),
-            'Income_Growth_Count': len(metrics['income_growth']),
-            'Margin_Growth_Count': len(metrics['margin_growth']),
-            'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
-            'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
-            'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_pct'],2),
-            'Revenue_Growth_N': metrics['revenue_n'],
-            'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
-            'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_outlier_pct'],2),
-            'Revenue_R2': safe_round(metrics['revenue_r2'], 4),
-            'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
-            'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
-            'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
-            'Income_Growth_PCT': safe_round(metrics['income_growth_pct'],2),
-            'Income_Growth_N': metrics['income_n'],
-            'Income_Growth_N_Outliers': metrics['income_n_outliers'],
-            'Income_Growth_Outlier_PCT': safe_round(metrics['income_outlier_pct'],2),
-            'Income_R2': safe_round(metrics['income_r2'], 4),
-            'Income_Avg_Residual_Last3': safe_round(metrics['income_avg_residual_last3']/1000, 2),
-            'Margin_Growth_Slope': safe_round(metrics['margin_growth_slope'], 4),
-            'Margin_Growth_Median': safe_round(metrics['margin_growth_median'], 2),
-            'Margin_Growth_N': metrics['margin_n'],
-            'Margin_Growth_N_Outliers': metrics['margin_n_outliers'],
-            'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
-            'Margin_R2': safe_round(metrics['margin_r2'], 4),
-            'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
-            'regression_update_datetime': metrics['regression_update_datetime'],
-            })
-
-        # st.write("metrics_to_update",metrics_to_update) #debug
-        # results_for_cik+=results
-        # st.write("results_for_cik",results_for_cik) #debug
-        # st.stop()
-        if metrics_to_update != None:
-            temp_df = pd.DataFrame([metrics_to_update])
-            postgres_update_bulk(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-            # st.write('temp_df',temp_df) #debug
-    except Exception as e:
-        st.write(f"failed to write regression results: {e}")
+        if quarterly_df.empty or len(quarterly_df) < 8:  # Need at least 2 years of data
+            return quarterly_df, None
         
-    # st.write(metrics)  # debug
-    # st.write(ss.selected_company)  # debug
-    # Add CSS for min-width columns
-    st.markdown("""
-        <style>
-            [data-testid="stColumn"] {
-                flex: 1 1 500px; 
-                min-width: 500px;
-            }
-            .centered-title {
-                text-align: center;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-    def centered_text(text: str):
-        st.markdown(f"<div style='text-align:center;'>{text}</div>", unsafe_allow_html=True)
+        # Ensure fiscal_timeframe column exists
+        if 'fiscal_timeframe' not in quarterly_df.columns:
+            return quarterly_df, None
         
-    if plot_regression_bin==1:
+        # Create a working dataframe with fiscal_timeframe
+        quarterly_df_wc = quarterly_df.reset_index(drop=True).copy()
+        quarterly_df_wc['fiscal_timeframe'] = quarterly_df_wc['fiscal_timeframe'].astype(str)
+        quarterly_df_wc = quarterly_df_wc.sort_values(by='fiscal_timeframe', ascending=True).reset_index(drop=True)
+        
+        # Parse fiscal_timeframe to extract year and quarter
+        def parse_fiscal_timeframe(tf_str):
+            """Parse '2025 Q1' format to (year, quarter)"""
+            try:
+                parts = tf_str.strip().split()
+                year = int(parts[0])
+                quarter = int(parts[1].replace('Q', ''))
+                return (year, quarter)
+            except:
+                return None
+        
+        quarterly_df_wc['year_quarter'] = quarterly_df_wc['fiscal_timeframe'].apply(parse_fiscal_timeframe)
+        quarterly_df_wc = quarterly_df_wc[quarterly_df_wc['year_quarter'].notna()]  # Remove rows with invalid fiscal_timeframe
+        
+        # st.write(quarterly_df_wc) #debug
+        
+        if len(quarterly_df_wc) < 8:
+            return quarterly_df, None
+        
+        metrics = {
+            'revenue_growth': {},
+            'revenue_growth_list': [],
+            'income_growth': {},
+            'income_growth_list': [],
+            'income_values_list': [],
+            'margin_growth': {},
+            'margin_growth_list': [],
+            'margin_values': [],
+            'revenue_consistency_score': 0,
+            'income_consistency_score': 0,
+            'last_3q_revenue_growth': 0,
+            'last_3q_income_growth': 0,
+            'last_3q_margin_growth': 0,
+            'last_3q_income_positive_count': 0,
+            'last_3q_income_growth_positive_count': 0,
+            'last_6q_revenue_median': 0,
+            'last_6q_income_median': 0,
+            'median_revenue_growth': 0,
+            'median_income_growth': 0,
+            'median_margin_growth': 0,
+            'last_3q_median_margin': 0,
+            'revenue_median': 0,
+            'revenue_growth_slope': 0,
+            'revenue_growth_median': 0,
+            'revenue_growth_pct': 0,
+            'revenue_n': 0,
+            'revenue_n_outliers': 0,
+            'revenue_outlier_pct': 0,
+            'revenue_r2': 0,
+            'revenue_avg_residual_last3': 0,
+            'income_median': 0,
+            'income_growth_slope': 0,
+            'income_growth_median': 0,
+            'income_growth_pct': 0,
+            'income_n': 0,
+            'income_n_outliers': 0,
+            'income_outlier_pct': 0,
+            'income_r2': 0,
+            'income_avg_residual_last3': 0,
+            'margin_median': 0,
+            'margin_growth_slope': 0,
+            'margin_growth_median': 0,
+            'margin_slope_pct': 0,
+            'margin_n': 0,
+            'margin_n_outliers': 0,
+            'margin_outlier_pct': 0,
+            'margin_r2': 0,
+            'margin_avg_residual_last3': 0,
+            'last_filing_date': None,
+            'last_report_date': None,
+        }
+
+        # st.dataframe(quarterly_df_wc)  # debug
+        metrics['last_filing_date']=quarterly_df_wc['last_filing_date'].max()
+        metrics['max_report_date']=quarterly_df_wc['max_report_date'].max()
+
+        # Add growth columns to the original dataframe
+        result_df = quarterly_df.copy()
+        result_df['Revenue_YoY_Growth_PCT'] = np.nan
+        result_df['Income_YoY_Growth_PCT'] = np.nan
+        result_df['Margin_YoY_Growth_PCT'] = np.nan
+        result_df['Margin_PCT'] = np.nan
+        
+        min_year=2020
+        
+        # Calculate and store margin values for all quarters
+        if 'Net Income' in quarterly_df_wc.columns and 'Revenue/Sales' in quarterly_df_wc.columns:
+            fiscal_str = quarterly_df_wc['fiscal_timeframe'].tolist()
+            end_date = quarterly_df_wc['end_date'].tolist()
+            revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
+            income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
+            metrics['last_6q_revenue_median'] = revenue_values.tail(6).median()
+            metrics['last_6q_income_median'] = income_values.tail(6).median()
+            metrics['revenue_median'] = revenue_values.median()
+            metrics['income_median'] = income_values.median()
+            
+            for i in range(len(quarterly_df_wc)):
+                if pd.notna(income_values.iloc[i]) and pd.notna(revenue_values.iloc[i]) and revenue_values.iloc[i] > 0:
+                    margin = (income_values.iloc[i] / revenue_values.iloc[i]) * 100
+                    fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
+                    metrics['margin_values'].append(margin)
+                    result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Margin_PCT'] = margin
+        
+        # Calculate YoY growth for Revenue/Sales
+        if 'Revenue/Sales' in quarterly_df_wc.columns:
+            revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
+            
+            for i in range(len(quarterly_df_wc)):
+                current_year, current_q = quarterly_df_wc.loc[i, 'year_quarter']
+                prior_year = current_year - 1
+                
+                # Find the corresponding quarter from prior year
+                prior_row = quarterly_df_wc[(quarterly_df_wc['year_quarter'].apply(lambda x: x[0] == prior_year and x[1] == current_q))]
+                
+                if not prior_row.empty and pd.notna(revenue_values.iloc[i]):
+                    prior_idx = prior_row.index[0]
+                    prior_value = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Revenue/Sales'], errors='coerce')
+                    current_value = revenue_values.iloc[i]
+                    
+                    if pd.notna(prior_value) and prior_value > 0:
+                        growth = ((current_value - prior_value) / prior_value) * 100
+                        fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
+                        if int(fiscal_str[:4])>=min_year:
+                            metrics['revenue_growth'][fiscal_str] = growth
+                            metrics['revenue_growth_list'].append(growth)
+                        # Update the result dataframe
+                        result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Revenue_YoY_Growth_PCT'] = growth
+                        # st.write(f"Revenue Growth for {fiscal_str}: {growth:.2f}%")  # debug
+        
+        # Calculate YoY growth for Net Income
+        if 'Net Income' in quarterly_df_wc.columns:
+            income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
+            
+            for i in range(len(quarterly_df_wc)):
+                current_year, current_q = quarterly_df_wc.loc[i, 'year_quarter']
+                prior_year = current_year - 1
+                
+                # Find the corresponding quarter from prior year
+                prior_row = quarterly_df_wc[(quarterly_df_wc['year_quarter'].apply(lambda x: x[0] == prior_year and x[1] == current_q))]
+                
+                if not prior_row.empty and pd.notna(income_values.iloc[i]):
+                    prior_idx = prior_row.index[0]
+                    prior_value = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Net Income'], errors='coerce')
+                    current_value = income_values.iloc[i]
+                    
+                    if pd.notna(prior_value) and prior_value != 0:
+                        growth = ((current_value - prior_value) / abs(prior_value)) * 100
+                        fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
+                        if int(fiscal_str[:4])>=min_year:
+                            metrics['income_growth'][fiscal_str] = growth
+                            metrics['income_growth_list'].append(growth)
+                            metrics['income_values_list'].append(current_value)
+                        # Update the result dataframe
+                        result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Income_YoY_Growth_PCT'] = growth
+        
+        # Calculate YoY growth for Margin (Net Income / Revenue)
+        if 'Net Income' in quarterly_df_wc.columns and 'Revenue/Sales' in quarterly_df_wc.columns:
+            income_values = pd.to_numeric(quarterly_df_wc['Net Income'], errors='coerce')
+            revenue_values = pd.to_numeric(quarterly_df_wc['Revenue/Sales'], errors='coerce')
+            margin_values = (income_values / revenue_values * 100).fillna(0)
+            
+            for i in range(len(quarterly_df_wc)):
+                current_year, current_q = quarterly_df_wc.loc[i, 'year_quarter']
+                prior_year = current_year - 1
+                
+                # Find the corresponding quarter from prior year
+                prior_row = quarterly_df_wc[(quarterly_df_wc['year_quarter'].apply(lambda x: x[0] == prior_year and x[1] == current_q))]
+                
+                if not prior_row.empty and pd.notna(income_values.iloc[i]) and pd.notna(revenue_values.iloc[i]):
+                    prior_idx = prior_row.index[0]
+                    prior_revenue = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Revenue/Sales'], errors='coerce')
+                    prior_income = pd.to_numeric(quarterly_df_wc.loc[prior_idx, 'Net Income'], errors='coerce')
+                    current_revenue = revenue_values.iloc[i]
+                    current_income = income_values.iloc[i]
+                    def normalize_margin(x):
+                        if x is None or (isinstance(x, float) and np.isnan(x)):
+                            return np.nan
+                        return float(x)
+
+                    def safe_margin(income, revenue):
+                        if revenue is None or revenue == 0 or np.isnan(revenue):
+                            return None
+                        return (income / revenue) * 100
+                    
+                    current_margin = None
+                    prior_margin = None
+                    
+                    if pd.notna(prior_revenue) and prior_revenue > 0 and pd.notna(prior_income):
+                        current_margin = safe_margin(current_income, current_revenue)
+                        prior_margin   = safe_margin(prior_income, prior_revenue)
+                        current_margin = normalize_margin(current_margin)
+                        prior_margin   = normalize_margin(prior_margin)
+
+                        if np.isnan(current_margin) or np.isnan(prior_margin):
+                            margin_growth = np.nan
+                        else:
+                            margin_growth = current_margin - prior_margin
+
+                        margin_growth = current_margin - prior_margin
+                        
+                        fiscal_str = quarterly_df_wc.loc[i, 'fiscal_timeframe']
+                        if int(fiscal_str[:4])>=min_year:
+                            metrics['margin_growth'][fiscal_str] = margin_growth
+                            metrics['margin_growth_list'].append(margin_growth)
+                        # Update the result dataframe
+                        result_df.loc[result_df['fiscal_timeframe'] == fiscal_str, 'Margin_YoY_Growth_PCT'] = margin_growth
+        
+        # Calculate consistency metrics
+        if metrics['revenue_growth_list']:
+            revenue_growths = metrics['revenue_growth_list']
+            result_df = result_df[result_df["fiscal_timeframe"].str[:4].astype(int) >= min_year] #filter to min_year
+
+            # st.write(metrics) #debug
+            metrics['median_revenue_growth'] = np.median(revenue_growths)
+
+            # Consistency score: positive growth with low volatility
+            metrics['revenue_consistency_score'] = len([g for g in revenue_growths if g > 0]) / len(revenue_growths) * 100
+            
+            # Last 3 quarters average
+            if len(revenue_growths) >= 3:
+                metrics['last_3q_revenue_growth'] = np.median(revenue_growths[-3:])
+            elif len(revenue_growths) > 0:
+                metrics['last_3q_revenue_growth'] = np.median(revenue_growths)
+            
+        if plot_regression_bin==1:
+            col1, col2 = st.columns([1,2])
+            with col1:
+                ticker=quarterly_df['ticker'].iloc[0]
+                url = f"https://finance.yahoo.com/quote/{ticker}/"
+                st.write("Click this for the Yahoo Finance Page (%s)" % url)
+            with col2:
+                remove_outliers = st.toggle("Remove outliers", value=False)
+        else:
+            remove_outliers=True
+
+            # Linear regression for revenue growth trend
+            # st.write(revenue_values)  # debug
+        if len(revenue_values) >= 6:
+            try:
+                # st.write(len(revenue_values),len(end_date)) #debug
+                slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue, regression_update_datetime = perform_regression(name, "Revenue", revenue_values, end_date, plot_regression_bin,remove_outliers)
+                metrics['revenue_r2'] = r2
+                metrics['revenue_growth_slope'] = safe_round(slope, 1)
+                metrics['revenue_growth_median'] = median
+                metrics['revenue_growth_pct'] = safe_round(metrics['revenue_growth_slope'] * 100 / (metrics['last_6q_revenue_median'] if metrics['last_6q_revenue_median'] != 0 else 1), 2) if 'revenue_growth_slope' in metrics and 'last_6q_revenue_median' in metrics else 0
+                metrics['revenue_n'] = n
+                metrics['revenue_n_outliers'] = n_outliers
+                metrics['revenue_outlier_pct'] = safe_round(metrics['revenue_n_outliers'] / metrics['revenue_n'] * 100, 2) if metrics['revenue_n'] > 0 else 0
+                metrics['revenue_avg_residual_last3'] = avg_residual_last3
+                metrics['regression_update_datetime'] = regression_update_datetime
+            except Exception as e:
+                slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_revenue, regression_update_datetime = 0, 0, 0, 0, 0, 0, 0, 0, None, None
+                st.write(f"Regression failed for Revenue on company {name} due to {e}")
+    
+        if metrics['income_growth_list']:
+            # st.write(metrics['income_values_list'],metrics['income_growth_list']) #debug
+            income_growths = metrics['income_growth_list']
+            metrics['median_income_growth'] = np.median(income_growths)
+            # income_values_list = metrics['income_values_list']
+            # Income growth consistency
+            metrics['income_consistency_score'] = len([g for g in income_growths if g > 0]) / len(income_growths) * 100
+            metrics['last_3q_income_growth_positive_count'] = len([g for g in income_growths[-3:] if g > 0]) if len(income_growths) >= 3 else len([g for g in income_growths if g > 0])
+            metrics['last_3q_income_positive_count'] = len([g for g in income_values[-3:] if g > 0]) if len(income_values) >= 3 else len([g for g in income_values if g > 0])
+            
+            # Last 3 quarters average
+            if len(income_growths) >= 3:
+                metrics['last_3q_income_growth'] = np.median(income_growths[-3:])
+            elif len(income_growths) > 0:
+                metrics['last_3q_income_growth'] = np.median(income_growths)
+            
+            # Linear regression for income growth trend
+        if len(income_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
+            try:
+                slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income, regression_update_datetime = perform_regression(name, "Income", income_values, end_date, plot_regression_bin, remove_outliers)
+                metrics['income_growth_slope'] = safe_round(slope, 1)
+                metrics['income_r2'] = r2
+                metrics['income_growth_median'] = median
+                metrics['income_growth_pct'] = safe_round(metrics['income_growth_slope'] * 100 / max(abs(metrics['last_6q_income_median']),abs(metrics['income_median'])) if metrics['last_6q_income_median'] != 0 else 1, 2) if 'income_growth_slope' in metrics and 'last_6q_income_median' in metrics else 0
+                metrics['income_n'] = n
+                metrics['income_n_outliers'] = n_outliers
+                metrics['income_outlier_pct'] = safe_round(metrics['income_n_outliers'] / metrics['income_n'] * 100, 2) if metrics['income_n'] > 0 else 0
+                metrics['income_avg_residual_last3'] = avg_residual_last3
+                metrics['regression_update_datetime'] = regression_update_datetime
+            except Exception as e:
+                slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_income, regression_update_datetime = 0, 0, 0, 0, 0, 0, 0, 0, None, None
+                st.write(f"Regression failed for Income for company {name} due to {e}")
+            
+        if metrics['margin_growth_list']:
+            margin_growths = metrics['margin_growth_list']
+            metrics['median_margin_growth'] = np.median(margin_growths)
+            
+            # Last 3 quarters average
+            if len(margin_growths) >= 3:
+                metrics['last_3q_margin_growth'] = np.median(margin_growths[-3:])
+            elif len(margin_growths) > 0:
+                metrics['last_3q_margin_growth'] = np.median(margin_growths)
+            
+        # Linear regression for margin growth trend
+        if len(margin_values) >= 6:  # Need at least 6 quarters to do a meaningful regression
+            try:
+                slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin, regression_update_datetime = perform_regression(name, "Margin", margin_values, end_date, plot_regression_bin, remove_outliers)
+                metrics['margin_r2'] = r2
+                metrics['margin_growth_slope'] = safe_round(slope, 1)
+                metrics['margin_avg_residual_last3'] = avg_residual_last3
+                metrics['margin_growth_median'] = median
+                metrics['margin_growth_pct'] = safe_round(metrics['margin_growth_slope'] * 100 / abs(metrics['margin_growth_median'] if metrics['margin_growth_median'] != 0 else 1), 2) if 'margin_growth_slope' in metrics and 'margin_growth_median' in metrics else 0
+                metrics['margin_n'] = n
+                metrics['margin_n_outliers'] = n_outliers
+                metrics['margin_outlier_pct'] = safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0
+                metrics['regression_update_datetime'] = regression_update_datetime
+            except Exception as e:
+                slope, intercept, r2, median, mean, n, n_outliers, avg_residual_last3, chart_margin, regression_update_datetime = 0, 0, 0, 0, 0, 0, 0, 0, None, None
+                st.write(f"Regression failed for Margin for company {name} due to {e}")
+        
+        # Calculate average margin and last 3 quarters average margin
+        if metrics['margin_values']:
+            margin_values = metrics['margin_values']
+            metrics['margin_median'] = np.median(margin_values)
+            
+            # Last 3 quarters average margin
+            if len(margin_values) >= 3:
+                metrics['last_3q_median_margin'] = np.median(margin_values[-3:])
+            elif len(margin_values) > 0:
+                metrics['last_3q_median_margin'] = np.median(margin_values)
+
+        # update DB
         try:
-            col1, col2, col3 = st.columns(3)
-            if chart_revenue is not None:
-                with col1:
-                    # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
-                    # revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
-                    placeholder=st.empty()
-                    placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
-                    annualized_growth = ((1+(metrics['revenue_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['revenue_growth_pct'])
-                    # st.write(f"metrics['revenue_growth_pct']={metrics['revenue_growth_pct']}, annualized={annualized_growth}")
-                    centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['revenue_r2']:.2f}, Outlier: {metrics['revenue_outlier_pct']:.0f}%, n={metrics['revenue_n']}")
-            if chart_income is not None:
-                with col2:
-                    # income_slope_pct = (metrics['income_growth_slope'] / metrics['income_growth_median'] * 100) if metrics['income_growth_median'] != 0 else 0
-                    placeholder=st.empty()
-                    placeholder.altair_chart(chart_income, width='stretch')
-                    # st.write(f"metrics['income_growth_pct']=  {((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100}, np.sign = {np.sign(metrics['income_growth_pct'])}") #debug
-                    annualized_growth = ((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['income_growth_pct'])
-                    centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['income_r2']:.2f}, Outlier: {metrics['income_outlier_pct']:.0f}%, n={metrics['income_n']}")
-            if chart_margin is not None:
-                with col3:
-                    # margin_slope_pct = (metrics['margin_growth_slope'] / metrics['margin_growth_median'] * 100) if metrics['margin_growth_median'] != 0 else 0
-                    placeholder=st.empty()
-                    placeholder.altair_chart(chart_margin, width='stretch')
-                    annualized_growth = ((1+(metrics['margin_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['margin_growth_pct'])
-                    centered_text   (f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['margin_r2']:.2f}, Outlier: {metrics['margin_outlier_pct']:.0f}%, n={metrics['margin_n']}")
+            cik = quarterly_df['cik'].max()
+            metrics_to_update={
+                'cik':cik,
+                'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
+                'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
+                'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
+                'Median_Income_Growth_PCT': safe_round(metrics['median_income_growth'], 2),
+                'Median_Margin_Growth_PCT': safe_round(metrics['median_margin_growth'], 2),
+                'Median_Margin_PCT': safe_round(metrics['margin_median'], 2),
+                'Last3Q_Revenue_Growth_PCT': safe_round(metrics['last_3q_revenue_growth'], 2),
+                'Last3Q_Income_Growth_PCT': safe_round(metrics['last_3q_income_growth'], 2),
+                'Last3Q_Margin_Growth_PCT': safe_round(metrics['last_3q_margin_growth'], 2),
+                'Last3Q_Median_Margin_PCT': safe_round(metrics['last_3q_median_margin'], 2),
+                'Last3Q_Income_Positive': int(metrics['last_3q_income_positive_count']),
+                'Last6Q_Revenue_Median': safe_round(metrics['last_6q_revenue_median'],0),
+                'Last6Q_Income_Median': safe_round(metrics['last_6q_income_median'],0),
+                'Revenue_Growth_Count': len(metrics['revenue_growth']),
+                'Income_Growth_Count': len(metrics['income_growth']),
+                'Margin_Growth_Count': len(metrics['margin_growth']),
+                'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
+                'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
+                'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_pct'],2),
+                'Revenue_Growth_N': metrics['revenue_n'],
+                'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
+                'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_outlier_pct'],2),
+                'Revenue_R2': safe_round(metrics['revenue_r2'], 4),
+                'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
+                'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
+                'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
+                'Income_Growth_PCT': safe_round(metrics['income_growth_pct'],2),
+                'Income_Growth_N': metrics['income_n'],
+                'Income_Growth_N_Outliers': metrics['income_n_outliers'],
+                'Income_Growth_Outlier_PCT': safe_round(metrics['income_outlier_pct'],2),
+                'Income_R2': safe_round(metrics['income_r2'], 4),
+                'Income_Avg_Residual_Last3': safe_round(metrics['income_avg_residual_last3']/1000, 2),
+                'Margin_Growth_Slope': safe_round(metrics['margin_growth_slope'], 4),
+                'Margin_Growth_Median': safe_round(metrics['margin_growth_median'], 2),
+                'Margin_Growth_N': metrics['margin_n'],
+                'Margin_Growth_N_Outliers': metrics['margin_n_outliers'],
+                'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
+                'Margin_R2': safe_round(metrics['margin_r2'], 4),
+                'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
+                'last_filing_date':metrics['last_filing_date'],
+                'max_report_date':metrics['max_report_date'],
+                'regression_update_datetime': metrics['regression_update_datetime'],
+                }
+
+            # st.write("metrics_to_update",metrics_to_update) #debug
+            # results_for_cik+=results
+            # st.write("metrics_to_update",metrics_to_update) #debug
+            # st.stop()
+            if metrics_to_update:
+                temp_df = pd.DataFrame([metrics_to_update])
+                postgres_update_bulk(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+                # st.write('temp_df',temp_df) #debug
         except Exception as e:
-            st.write(f"Could not render regression charts due to {e}")
+            st.write(f"failed to write regression results: {e}")
+            
+        # st.write(metrics)  # debug
+        # st.write(ss.selected_company)  # debug
+        # Add CSS for min-width columns
+        st.markdown("""
+            <style>
+                [data-testid="stColumn"] {
+                    flex: 1 1 500px; 
+                    min-width: 500px;
+                }
+                .centered-title {
+                    text-align: center;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+
+        def centered_text(text: str):
+            st.markdown(f"<div style='text-align:center;'>{text}</div>", unsafe_allow_html=True)
+            
+        if plot_regression_bin==1:
+            try:
+                col1, col2, col3 = st.columns(3)
+                if chart_revenue is not None:
+                    with col1:
+                        # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
+                        # revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
+                        placeholder=st.empty()
+                        placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
+                        annualized_growth = ((1+(metrics['revenue_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['revenue_growth_pct'])
+                        # st.write(f"metrics['revenue_growth_pct']={metrics['revenue_growth_pct']}, annualized={annualized_growth}")
+                        centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['revenue_r2']:.2f}, Outlier: {metrics['revenue_outlier_pct']:.0f}%, n={metrics['revenue_n']}")
+                if chart_income is not None:
+                    with col2:
+                        # income_slope_pct = (metrics['income_growth_slope'] / metrics['income_growth_median'] * 100) if metrics['income_growth_median'] != 0 else 0
+                        placeholder=st.empty()
+                        placeholder.altair_chart(chart_income, width='stretch')
+                        # st.write(f"metrics['income_growth_pct']=  {((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100}, np.sign = {np.sign(metrics['income_growth_pct'])}") #debug
+                        annualized_growth = ((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['income_growth_pct'])
+                        centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['income_r2']:.2f}, Outlier: {metrics['income_outlier_pct']:.0f}%, n={metrics['income_n']}")
+                if chart_margin is not None:
+                    with col3:
+                        # margin_slope_pct = (metrics['margin_growth_slope'] / metrics['margin_growth_median'] * 100) if metrics['margin_growth_median'] != 0 else 0
+                        placeholder=st.empty()
+                        placeholder.altair_chart(chart_margin, width='stretch')
+                        annualized_growth = ((1+(metrics['margin_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['margin_growth_pct'])
+                        centered_text   (f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['margin_r2']:.2f}, Outlier: {metrics['margin_outlier_pct']:.0f}%, n={metrics['margin_n']}")
+            except Exception as e:
+                st.write(f"Could not render regression charts due to {e}")
+    except Exception as e:
+        exc_type, exc_obj, tb = sys.exc_info()
+        filename = tb.tb_frame.f_code.co_filename
+        line_no = tb.tb_lineno
+        code_line = linecache.getline(filename, line_no).strip()
+        error_text=f"analyze_yoy_growth failed for {name} on file: {filename}, line #{line_no}, code line: {code_line}: {e}"
+        st.write(error_text)
+        print(error_text)
+        logging.error(error_text) #debug
     print("at end of analyze_yoy_growth function")
     # st.write(metrics) #debug
     # st.stop() #debug
@@ -1012,6 +1028,7 @@ def compute_value_score_on_df(show_df=False):
                     # perform the DB write
                     postgres_update_bulk(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])
                     st.toast("Scores saved to DB")
+                    ss.apply_scores_done=True
                 except Exception as e:
                     st.error(f"DB update failed: {e}")
                     # keep apply_scores_requested True so user can retry after fixing issues
@@ -1019,7 +1036,7 @@ def compute_value_score_on_df(show_df=False):
             # only assign after successful write
             st.success("Saved to DB and updated rankings.")
             ss.apply_scores_requested = ss.apply_scores_done = False
-            ss.rankings_df = ss.rankings_df.iloc[0,0]
+            # ss.rankings_df = ss.rankings_df.iloc[0,0]
             st.rerun()
             # optionally clear the request flag if you want one-shot behavior:
             # ss.apply_scores_requested'] = False
@@ -1033,12 +1050,13 @@ def compute_value_score_on_df(show_df=False):
     else:
     # if view dataframe was not set to True, update DB and assign to ss.rankings.df
         postgres_update_bulk(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-        ss.rankings_df = ss.rankings_df.iloc[0,0]
+        ss.rankings_df = ss.rankings_df.iloc[0:0]
         ss.view_stock_analysis_form=True
-        st.rerun()
-        print('exiting compute_value_score_on_df')
+        print('exiting compute_value_score_on_df, rerunning app')
         return
-
+        st.rerun()
+    print('exiting compute_value_score_on_df')
+    return
 
 #Note that ss.quarterly_financials must be loaded for this to function
 def collect_data_for_company(cik):
@@ -1296,13 +1314,54 @@ def rank_companies_by_growth_and_update_DB(cik_list):
             last_regression_update_datetime = ss.rankings_df.loc[ss.rankings_df['cik'] == cik, 'regression_update_datetime'].max()
             status.write(f"Processing CIK {cik} ({i+1}/{total}, {safe_round(safe_multiply(safe_divide(total_updated+1,i+1),100),1)}% success writing updates to DB)")
             results_for_cik=update_yahoo_data_for_company(cik)
-            last_reg_ts = pd.to_datetime(last_regression_update_datetime, utc=True, errors='coerce').floor('s')
-            last_sec_ts = pd.to_datetime(last_sec_update_datetime, utc=True, errors='coerce').floor('s')
-            # st.write(f"cik {cik}, last_regression_update_datetime={last_regression_update_datetime}, last_sec_update_datetime={last_sec_update_datetime}")
-            if pd.isna(last_reg_ts) or last_reg_ts<last_sec_ts:
-                print('processing regression')
+            # last_filing_ts = pd.to_datetime(last_filing_date, utc=True, errors='coerce')
+            # last_reg_ts = pd.to_datetime(last_regression_update_datetime, utc=True, errors='coerce').floor('s') - pd.Timedelta(hours=24)
+            # last_sec_ts = pd.to_datetime(last_sec_update_datetime, utc=True, errors='coerce').floor('s')
+            # st.write(f"{company_and_ticker}: last_regression_update_datetime={last_reg_ts.date()}, last_sec_update_datetime={last_sec_ts.date()}, last_filing_date={last_filing_date}")
+            # if pd.isna(last_reg_ts) or last_reg_ts<=last_sec_ts or last_filing_ts<(pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=90)):
+            #     # print('processing regression')
+            #     st.write(f"{company_and_ticker}: last_regression_update_datetime={last_reg_ts.date()}, last_sec_update_datetime={last_sec_ts.date()}, last_filing_date={last_filing_date}")
+            #     df_for_cik = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik]
+            #     analyze_yoy_growth(df_for_cik,company_and_ticker,plot_regression_bin=0)
+
+            last_filing_ts = pd.to_datetime(last_filing_date, utc=True, errors='coerce')
+            last_reg_ts = pd.to_datetime(last_regression_update_datetime, utc=True, errors='coerce')
+            if pd.notna(last_reg_ts):
+                last_reg_ts = last_reg_ts.floor('s') - pd.Timedelta(hours=24)
+            last_sec_ts = pd.to_datetime(last_sec_update_datetime, utc=True, errors='coerce')
+            if pd.notna(last_sec_ts):
+                last_sec_ts = last_sec_ts.floor('s')
+
+            # helper to format safely
+            def fmt_date(ts):
+                return ts.strftime("%Y-%m-%d") if pd.notna(ts) else "NaT"
+
+            # st.write(
+            #     f"{company_and_ticker}: "
+            #     f"last_regression_update_datetime={fmt_date(last_reg_ts)}, "
+            #     f"last_sec_update_datetime={fmt_date(last_sec_ts)}, "
+            #     f"last_filing_date={fmt_date(last_filing_ts)}"
+            # )
+
+            # threshold for stale filings
+            threshold_90 = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=90)
+
+            # decide stale_filing: True if missing OR older than 90 days
+            stale_filing = pd.isna(last_filing_ts) or (last_filing_ts < threshold_90)
+
+            # decide to run: if no last_reg, or last_reg is older-or-equal than last_sec, or filing is stale
+            need_regression = pd.isna(last_reg_ts) or (
+                pd.notna(last_sec_ts) and last_reg_ts <= last_sec_ts
+            ) or stale_filing
+
+            if need_regression:
+                st.write(f"Processing regression for {company_and_ticker} (reason: "
+                        f"{'no last_reg' if pd.isna(last_reg_ts) else ''}"
+                        f"{' last_reg <= last_sec' if pd.notna(last_sec_ts) and last_reg_ts <= last_sec_ts else ''}"
+                        f"{' stale filing' if stale_filing else ''})")
                 df_for_cik = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik]
-                analyze_yoy_growth(df_for_cik,company_and_ticker,plot_regression_bin=0)
+                # st.write(f"df_for_cik",df_for_cik) #debug
+                analyze_yoy_growth(df_for_cik, company_and_ticker, plot_regression_bin=0)
 
             # st.write("results",results) #debug
             # # results_for_cik+=results
@@ -1321,6 +1380,7 @@ def rank_companies_by_growth_and_update_DB(cik_list):
             code_line = linecache.getline(filename, line_no).strip()
             error_text=f"Failed to append results for {company_and_ticker} on file: {filename}, line #{line_no}, code line: {code_line}: {e}"
             st.write(error_text)
+            print(error_text)
             logging.error(error_text) #debug
             # st.stop() #debug
         # st.write(f"i={i}, total={total}") #debug
@@ -1599,7 +1659,11 @@ def write_sec_data_into_db(load_type):
                 for pretty, spec in column_specs.items()
             })
             
-            postgres_update_bulk(df_pg, 'stock_quarterly_financials_sec', ['cik','fiscal_timeframe'])  # Save quarterly data with metrics to PostgreSQL
+            primary_key_columns=['cik','fiscal_timeframe']
+            agg = {c: 'last' for c in df_pg.columns if c not in primary_key_columns}
+            df_pg = df_pg.groupby(primary_key_columns, as_index=False).agg(agg)
+            # st.write(df_pg) #debug
+            postgres_update_bulk(df_pg, 'stock_quarterly_financials_sec', primary_key_columns=primary_key_columns)  # Save quarterly data with metrics to PostgreSQL
         except Exception as e:
             error=error+1
             st.write(f"Failed to load and write SEC data for {company_and_ticker}: {e}")
@@ -2211,14 +2275,13 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-        'Last6Q_Revenue_Margin_PCT','Last6Q_Income_Margin_PCT','last_filing_date','last_earnings_date','stock_price_update_datetime',
+        'Last6Q_Revenue_Margin_PCT','Last6Q_Income_Margin_PCT','last_filing_date','last_earnings_date','next_earnings_date','stock_price_update_datetime',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers']
 
     # st.write("**Stock Growth Analysis Data:**")
-    # st.write(len(ss.editable_stock_growth_analysis_df)) # debug
-    if len(ss.editable_stock_growth_analysis_df) == 0 or ss.editable_stock_growth_analysis_df.empty or len(ss.rankings_df) or ss.rankings_df.empty == 0:
+    if len(ss.editable_stock_growth_analysis_df) == 0 or ss.editable_stock_growth_analysis_df.empty or len(ss.rankings_df)==0 or ss.rankings_df.empty == 0:
         ss.rankings_df = load_stock_growth_analysis_data_from_db()
         column_specs=get_column_specs_results_df()
         rename_map = {
@@ -2294,8 +2357,10 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             if col in df.columns
         }
     
-    def build_styler(df):
+    def build_styler(df, max_col_width: str = "140px"):
         styled = df.style
+        # styled = styled.set_table_attributes('style="table-layout: fixed; width: 100%;"')
+
         cols_for_color_inc=[
                 'Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
@@ -2323,13 +2388,24 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 
         for col, (q20, q40, q60, q80) in q_dec.items():
             def color_func(s, q20=q20, q40=q40, q60=q60, q80=q80):
-                return [
-                    'background-color: red' if v >= q80 else
-                    'background-color: green' if v <= q40 else
-                    'background-color: mediumseagreen' if v<=q60
-                    else ''
-                    for v in s
-                ]
+                out = []
+                for v in s:
+                    # skip NaN and near-zero values
+                    if pd.isna(v) or (isinstance(v, (int, float)) and abs(v) < 0.01):
+                        out.append('')
+                        continue
+
+                    # apply original rules
+                    if v >= q80:
+                        out.append('background-color: red')
+                    elif v <= q40:
+                        out.append('background-color: green')
+                    elif v <= q60:
+                        out.append('background-color: mediumseagreen')
+                    else:
+                        out.append('')
+                return out
+
             styled = styled.apply(color_func, subset=[col])
 
         # apply bottom-quintile red
@@ -2337,6 +2413,28 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             def red_func(s, q40=q40):
                 return ['background-color: red' if v <= q40 else '' for v in s]
             styled = styled.apply(red_func, subset=[col])
+
+        # th_props = [
+        #     ("white-space", "normal"),
+        #     ("overflow-wrap", "break-word"),
+        #     ("word-break", "break-word"),
+        #     ("max-width", max_col_width),
+        #     ("text-align", "left"),
+        #     ("padding", "6px")
+        # ]
+        # td_props = [
+        #     ("overflow", "hidden"),
+        #     ("text-overflow", "ellipsis"),
+        #     ("white-space", "nowrap"),
+        #     ("max-width", max_col_width)
+        # ]
+
+        # styled = styled.set_table_styles([
+        #     {"selector": "th", "props": th_props},
+        #     {"selector": "th.col_heading", "props": th_props},
+        #     {"selector": "td", "props": td_props},
+        # ])
+        
         return styled
 
     disabled_cols = list(set(columns) - set(editable_columns) )
@@ -2371,6 +2469,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         """,
         unsafe_allow_html=True,
     )
+
+    # st.write(ss.rankings_df) # debug
     # st.write("ss.editable_stock_growth_analysis_df",ss.editable_stock_growth_analysis_df) #debug
     
     with st.expander("Expand to show filters", key="temp_filters_expanded", on_change=update_primary_filter_session_value, args=("filters_expanded",)):
@@ -2393,11 +2493,14 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             # max_rev_outlier_pct = st.number_input("Max Revenue Outlier % (0 = No filter)?", min_value=0, max_value=100, step=5, format="%d", on_change=update_primary_filter_session_value, args=("filter_rev_outlier_pct",))
 
     if ss.filter_company_and_ticker != None:
-        # st.write(company_and_ticker) #debug
+        print(f"ss.filter_company_and_ticker={ss.filter_company_and_ticker}, company_and_ticker={company_and_ticker}") #debug
         selected_cik = ss.rankings_df.loc[ss.rankings_df['company_and_ticker'] == ss.filter_company_and_ticker, "cik"].iloc[0]
         mask = ss.editable_stock_growth_analysis_df['cik'] == selected_cik
         ss.selected_company=selected_cik
     else:
+        # ss.selected_company = ss.filter_company_and_ticker = None
+        # print(f"ss.filter_company_and_ticker={ss.filter_company_and_ticker}, len(ss.rankings_df)={len(ss.rankings_df)}, len(ss.editable_stock_growth_analysis_df)={len(ss.editable_stock_growth_analysis_df)}")
+
         mask_categories = ["" if c == "Uncategorized" else c for c in ss.filter_category]
         mask = (ss.editable_stock_growth_analysis_df['category'].isin(mask_categories))
 
@@ -2481,21 +2584,33 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             .reset_index(drop=True)
             .copy()
     )
+    
+    if ss.admin_buttons==True:
+        with color_button('red'):
+            calc_scores_btn=st.button('Calculate Revised Value Scoring')
         
+        if calc_scores_btn:
+            ss.compute_value_score=True
+            # ss.rankings_df = ss.rankings_df.iloc[0,0]
+            # compute_value_score_on_df(show_df=True)
+    
     with color_button('blue'):
         update_yahoo_and_stats_btn = st.button('Hit this button to update Yahoo Stock Data for CURRENTLY SELECTED Stocks (only when stock price needs updating or selection widens)')
 
     if update_yahoo_and_stats_btn:
         cik_list = ss.filtered_df['cik'].tolist()   
         rank_companies_by_growth_and_update_DB(cik_list)
+        # print(f"len(ss.rankings_df)={len(ss.rankings_df)}",ss.rankings_df) #debug
         ss.rankings_df = ss.rankings_df.iloc[0:0]
         ss.view_stock_analysis_form=True
         st.rerun()
 
     # ss.df=filtered_df.copy()        
     styled = build_styler(ss.filtered_df)
-
+    
     def on_change_handle():
+        
+        print("entering on_change_handle")
         if "my_editor" not in ss or "filtered_df" not in ss:
             return
         
@@ -2576,7 +2691,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
-
+    
+    # header_config = {'header': {'font-weight': 'bold', 'text-align': 'center'}}
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 # ,hide_index=True
                 ,column_config= {
@@ -2587,7 +2703,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'category': st.column_config.SelectboxColumn(label="Category", pinned=True, options=ss.categories_list, width=100),
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
-                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", format='%.0f', width="small"),
+                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", format='%,.0f', width="small"),
                 'curr_value':st.column_config.NumberColumn(label="Curr Value", format='dollar', step='int', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
                 # 'price_range_52wks': st.column_config.TextColumn(),
@@ -2621,12 +2737,15 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 "Income_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
                 "Margin_Growth_Outlier_PCT": st.column_config.NumberColumn(label="Outlier %", format='%.1f', width="small"),
                 'Revenue_Growth_Median':st.column_config.NumberColumn(label="Revenue Median", format='dollar', step='int'),
-                "Last3Q_Revenue_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Revenue Growth %", format='%.1f'),
-                "Last3Q_Income_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Income Growth %", format='%.1f'),
-                "Last3Q_Margin_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Margin Growth %", format='%.1f'),
-                "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%.1f'),
+                "Last3Q_Revenue_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Revenue Growth %", format='%,.1f'),
+                "Last3Q_Income_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Income Growth %", format='%,.1f'),
+                "Last3Q_Margin_Growth_PCT": st.column_config.NumberColumn(label="Last 3Q Margin Growth %", format='%,.1f'),
+                "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%,.1f'),
                 "Last6Q_Revenue_Margin_PCT": st.column_config.NumberColumn(label="Last 6Q Revenue Median", format='dollar',step='int'),
                 "Last6Q_Income_Margin_PCT": st.column_config.NumberColumn(label="Last 6Q Income Median", format='dollar',step='int'),
+                "last_filing_date": st.column_config.DateColumn(),
+                "last_earnings_date": st.column_config.DateColumn(),
+                "next_earnings_date": st.column_config.DateColumn(),
                 "stock_price_update_datetime": st.column_config.DatetimeColumn(label="Price Update Time",format="MMM DD, hh:mm A",timezone="US/Pacific" ),
                 },
                 )
@@ -2635,17 +2754,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     if ss.transaction_show_modal == True:
         transaction_show_modal()
     
-    if ss.admin_buttons==True:
-        with color_button('red'):
-            calc_scores_btn=st.button('Calculate Revised Value Scoring')
-        
-        if calc_scores_btn:
-            ss.compute_value_score=True
-            # ss.rankings_df = ss.rankings_df.iloc[0,0]
-            # compute_value_score_on_df(show_df=True)
-
     if ss.compute_value_score==True:
-        # st.write(f"ss.apply_scores_requested={ss.apply_scores_requested}, ss.apply_scores_done={ss.apply_scores_done}") #debug        
+        st.write(f"ss.compute_value_score={ss.compute_value_score}, ss.apply_scores_requested={ss.apply_scores_requested}, ss.apply_scores_done={ss.apply_scores_done}") #debug        
         compute_value_score_on_df(show_df=True)
     
     if ss.selected_company is not None:

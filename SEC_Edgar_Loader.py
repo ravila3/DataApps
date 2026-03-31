@@ -972,7 +972,7 @@ def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> p
         # If the file doesn't exist (weekends, holidays), skip it
         if response.status_code != 200:
             current += dt.timedelta(days=1)
-            st.write(f"Skipping due to response.status_code = {response.status_code}")
+            st.warning(f"Skipping due to response.status_code = {response.status_code}")
             continue
 
         text = response.text
