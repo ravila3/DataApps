@@ -566,6 +566,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
 
         # st.write(metrics) #debug
         metrics['median_revenue_growth'] = np.median(revenue_growths)
+
         # Consistency score: positive growth with low volatility
         metrics['revenue_consistency_score'] = len([g for g in revenue_growths if g > 0]) / len(revenue_growths) * 100
         
@@ -692,8 +693,8 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             'Last3Q_Margin_Growth_PCT': safe_round(metrics['last_3q_margin_growth'], 2),
             'Last3Q_Median_Margin_PCT': safe_round(metrics['last_3q_median_margin'], 2),
             'Last3Q_Income_Positive': int(metrics['last_3q_income_positive_count']),
-            'Last6Q_Revenue_Median': int(metrics['last_6q_revenue_median']),
-            'Last6Q_Income_Median': int(metrics['last_6q_income_median']),
+            'Last6Q_Revenue_Median': safe_round(metrics['last_6q_revenue_median'],0),
+            'Last6Q_Income_Median': safe_round(metrics['last_6q_income_median'],0),
             'Revenue_Growth_Count': len(metrics['revenue_growth']),
             'Income_Growth_Count': len(metrics['income_growth']),
             'Margin_Growth_Count': len(metrics['margin_growth']),
@@ -786,108 +787,9 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     # st.stop() #debug
     return metrics
 
-def compute_value_score(company_and_ticker, m, trailing_pe, forward_pe, trailing_ps):
-    """
-    Compute a growth-adjusted valuation score using:
-    - Growth Quality
-    - Recent Momentum
-    - Stability
-    - Valuation Pressure
-    """
-    # st.write(company_and_ticker, trailing_pe, forward_pe, trailing_ps, revenue_growth_PCT, income_growth_PCT, revenue_growth_outlier_PCT, income_growth_outlier_PCT) # debug
-
-    # Hard fail for insufficient history
-    try:
-        if m['revenue_n'] < 8:
-            st.write(f"Not enough data points for {company_and_ticker}")
-            return -100.0, -100.0, -100.0, -100.0, -100.0
-
-        # --- Growth Quality ---
-        capped_rev_growth_PCT=min(m['revenue_growth_pct'],100)
-        capped_inc_growth_PCT=min(m['income_growth_pct'],2*capped_rev_growth_PCT)
-        capped_margin_growth_slope=min(m['margin_growth_pct'],10)
-        
-        # st.write(f"capped_rev_growth_PCT = {capped_rev_growth_PCT}, capped_inc_growth_PCT = {capped_inc_growth_PCT}") #debug
-        # st.write(f"m['income_growth_pct']={m['income_growth_pct']}")
-        # st.stop() #debug
-        
-        GQ = safe_round((
-            1.4 * (capped_rev_growth_PCT * m['revenue_r2'])
-            + 1.4 * (capped_inc_growth_PCT * m['income_r2'])
-            + 0.5 * (capped_margin_growth_slope * m['margin_r2'])
-            - 1.0 * (m['revenue_outlier_pct'] + m['income_outlier_pct'])
-        ),1)
-
-        # --- Recent Momentum ---
-        rev = m['last_3q_revenue_growth']
-        inc = m['last_3q_income_growth']
-
-        # Cap income growth to 2x revenue growth
-        capped_rev = min(rev, 100)
-        capped_inc = min(inc, 2 * capped_rev)
-
-        RM = safe_round(
-            (
-                0.10 * capped_rev
-                + 0.10 * capped_inc
-                - 3 * (3 - m['last_3q_income_positive_count'])
-            ),
-            1
-        )
-
-        # --- Stability (softened + capped) ---
-
-        rev_norm_raw = m['revenue_avg_residual_last3'] / max(abs(m['revenue_growth_median']), 1)
-        inc_norm_raw = m['income_avg_residual_last3'] / max(abs(m['income_growth_median']), 1)
-
-        # Cap extreme spikes at 25%
-        rev_norm = min(abs(rev_norm_raw), 0.25)
-        inc_norm = min(abs(inc_norm_raw), 0.25)
-
-        ST = safe_round(
-            1.5 * m['revenue_r2']
-            + 1.5 * m['income_r2']
-            - 1.5 * rev_norm
-            - 1.5 * inc_norm,
-            1
-        )
-        
-        ST = max(ST,0) #if negative, make it 0
-
-        # --- Valuation Pressure ---
-        try:
-            tpe = float(trailing_pe) if trailing_pe not in (None, "") and trailing_pe>=0 else 0.0
-            tpe = min(tpe,500)
-            fpe = float(forward_pe)  if forward_pe  not in (None, "") and forward_pe>=0 else 0.0
-            tps = float(trailing_ps) if trailing_ps not in (None, "") else 0.0
-        except Exception as e:
-            st.write(f"Error on Value_Pressure calc for {company_and_ticker}: {e}")
-            return -100.0, -100.0, -100.0, -100.0, -100.0
-
-        VP = safe_round(
-            2 * math.log1p(tpe)
-            + 2* math.log1p(fpe)
-            + 4 * math.log1p(tps),
-            1
-        )
-        
-        if VP<2:
-            VP=2.0
-            
-        # --- Final Score ---
-        score = safe_round(((GQ + RM) * ST) / VP,1)
+def compute_value_score_on_df(show_df=False):
     
-    except Exception as e:
-        st.write(f"{company_and_ticker} had error on value calc: {e}")
-        return -100.0, -100.0, -100.0, -100.0, -100.0
-
-        
-    # st.write(m) #debug
-    # st.write(f"{company_and_ticker}: Value Score: {score}, Growth Qual: {GQ}, Recent Momentum: {RM}, Stability: {ST}, Value Pressure: {VP}") #, PE: {trailing_pe}, fwd PE:{forward_pe:.1f}, PS:{trailing_ps:.1f}")
-    # st.stop() #debug
-    return score, GQ, RM, ST, VP
-
-def compute_value_score_on_df():
+    print('starting compute_value_score_on_df')
     with st.spinner("Calculating Value Scores"):
         ss.rankings_df = load_stock_growth_analysis_data_from_db()
 
@@ -899,7 +801,7 @@ def compute_value_score_on_df():
             return pd.to_numeric(df[col], errors="coerce")
 
         # --- Growth Quality (GQ) ---
-        capped_rev_growth_PCT = to_num('revenue_growth_pct').clip(upper=100)
+        capped_rev_growth_PCT = to_num('revenue_growth_pct').clip(upper=100,lower=-100)
         capped_inc_growth_PCT = np.minimum(to_num('income_growth_pct'), 2 * capped_rev_growth_PCT)
         capped_margin_growth_slope = to_num('margin_growth_slope').clip(upper=10)
 
@@ -907,87 +809,194 @@ def compute_value_score_on_df():
         ratio = ratio.replace([np.inf, -np.inf], np.nan)
 
         # mask: income negative AND revenue magnitude above absolute threshold
-        mask = (df['last6q_income_median'] < 0) & (df['last6q_revenue_median'].abs() > 500000)
-        income_revenue_ratio = ratio.where(mask, 0.0).fillna(0.0)
+        mask_income_revenue_ratio = (df['last6q_income_median'] < 0) & (df['last6q_revenue_median'].abs() > 500000)
+        income_revenue_ratio = ratio.where(mask_income_revenue_ratio, 0.0).fillna(0.0)
 
         # fill other NaNs with 0.0 (or choose different policy)
         # df_f = df.fillna({c: 0.0 for c in cols})
 
         GQ_raw = (
-            1.4 * (capped_rev_growth_PCT * to_num('revenue_r2'))
+            2 * (capped_rev_growth_PCT * to_num('revenue_r2'))
             + 1.4 * (capped_inc_growth_PCT * to_num('income_r2'))
             + 0.5 * (capped_margin_growth_slope * to_num('margin_r2'))
             + 10 * income_revenue_ratio
-            - 1.0 * (to_num('revenue_growth_outlier_pct') + to_num('income_growth_outlier_pct'))
+            - 0.1 * (to_num('revenue_growth_outlier_pct') + to_num('income_growth_outlier_pct'))
         )
 
         GQ_raw = np.where(df['revenue_growth_n'] < 8, -100.0, GQ_raw)
-        
-        df['income_revenue_ratio']=10*income_revenue_ratio
         df['growth_quality'] = GQ_raw.round(1)
 
         # --- Recent Momentum (RM) ---
+        
         rev = to_num('last3q_revenue_growth_pct')
         inc = to_num('last3q_income_growth_pct')
         capped_rev = rev.clip(upper=100)
         capped_inc = np.minimum(inc, 2 * capped_rev)
+        
+        rev_last3_residuals = to_num('revenue_avg_residual_last3')
+        inc_last3_residuals = to_num('income_avg_residual_last3')
+        rev_denom = to_num('last6q_revenue_median').abs().clip(lower=100000)
+        inc_denom = to_num('last6q_income_median').abs().clip(lower=rev_denom*.1)
+        rev_last3q_vs_trend=rev_last3_residuals/rev_denom*1000*(capped_rev_growth_PCT+100)*to_num('revenue_r2')/4
+        inc_last3q_vs_trend=inc_last3_residuals/inc_denom* 1000*(capped_inc_growth_PCT+100)*to_num('income_r2')/6
+        
+        # RM_raw = 0.10 * capped_rev + 0.10 * capped_inc - 3 * (3 - to_num('last3q_income_positive'))
+        RM_raw = (0.10 * capped_rev + 0.05 * capped_inc 
+            + 0.5 * rev_last3q_vs_trend
+            + 0.5 * inc_last3q_vs_trend
+            - 3 * (3 - to_num('last3q_income_positive'))
+            )
 
-        RM_raw = 0.10 * capped_rev + 0.10 * capped_inc - 3 * (3 - to_num('last3q_income_positive'))
         df['recent_momentum'] = RM_raw.round(1)
 
         # --- Stability (ST) ---
-        # avoid division by zero by ensuring denominator >= 1
-        rev_denom = to_num('revenue_growth_median').abs().clip(lower=1)
-        inc_denom = to_num('income_growth_median').abs().clip(lower=1)
 
-        rev_norm_raw = to_num('revenue_avg_residual_last3') / rev_denom
-        inc_norm_raw = to_num('income_avg_residual_last3') / inc_denom
+        rev_norm_raw = to_num('revenue_avg_residual_last3') / rev_denom * 1000
+        inc_norm_raw = to_num('income_avg_residual_last3') / inc_denom * 1000
 
-        rev_norm = rev_norm_raw.abs().clip(upper=0.25)
-        inc_norm = inc_norm_raw.abs().clip(upper=0.25)
+        rev_norm = rev_norm_raw.abs().clip(upper=1)
+        inc_norm = inc_norm_raw.abs().clip(upper=1)
+        
+        ST_raw = 4 * to_num('revenue_r2') + 4 * to_num('income_r2') - 4 * rev_norm - 2 * inc_norm
+        # ST_raw = 2 * to_num('revenue_r2') + 2 * to_num('income_r2') - 1.5 * rev_norm - 1.5 * inc_norm
 
-        ST_raw = 1.5 * to_num('revenue_r2') + 1.5 * to_num('income_r2') - 1.5 * rev_norm - 1.5 * inc_norm
         df['stability_trend'] = ST_raw.round(1).clip(lower=0)
 
         # --- Valuation Pressure (VP) ---
+        
         # Coerce P/E and P/S to numeric, treat negatives as 0, cap trailing PE at 500
         tpe = pd.to_numeric(df.get('trailing_pe', pd.Series(dtype=float)), errors='coerce').fillna(0)
-        tpe = tpe.where(tpe >= 0, 0).clip(upper=500)
+        tpe = tpe.where(tpe >= 0, 0).clip(upper=300)
+        tpe_component = 5*np.log1p(tpe) 
 
         fpe = pd.to_numeric(df.get('forward_pe', pd.Series(dtype=float)), errors='coerce').fillna(0)
         fpe = fpe.where(fpe >= 0, 0)
+        fpe_component = 5*np.log1p(fpe)
 
         tps = pd.to_numeric(df.get('trailing_ps', pd.Series(dtype=float)), errors='coerce').fillna(0)
         tps = tps.where(tps >= 0, 0)
+        tps_component = 20*np.log1p(tps)
+        
+        price_ratio_components = pd.concat([tpe_component,np.maximum(fpe_component,tps_component)],axis=1)
+        price_ratio_components = price_ratio_components.where(price_ratio_components > 0, np.nan)
+
+        VP_raw=price_ratio_components.mean(axis=1, skipna=True)
+        VP_raw = VP_raw.fillna(30.0)
+        VP_raw = VP_raw.clip(lower=2.0)
 
         # compute VP and enforce minimum of 2
-        VP_raw = 2 * np.log1p(tpe) + 2 * np.log1p(fpe) + 4 * np.log1p(tps)
-        df['value_pressure'] = VP_raw.round(1).clip(lower=2)
+        # VP_raw = (2 * np.log1p(tpe) + 2 * np.log1p(fpe) + 10 * np.log1p(tps)).clip(lower=2)
+        
+        # if no PE or PS available, assume 30 since that company is likely not available to buy
+        no_price_info = (tpe == 0) & (fpe == 0) & (tps == 0)
+        VP_raw = VP_raw.where(~no_price_info, -100)
+        df['value_pressure'] = VP_raw.round(1)
 
         # --- Final Score ---
-        # Avoid division by zero or invalid values: where VP is finite and > 0 compute score, else set sentinel
-        valid_mask = np.isfinite(df['growth_quality']) & np.isfinite(df['recent_momentum']) & np.isfinite(df['stability_trend']) & (df['value_pressure'] > 0)
-
         score_raw = ((df['growth_quality'] + df['recent_momentum']) * df['stability_trend']) / df['value_pressure']
-        df['consolidated_score'] = np.where(valid_mask, score_raw.round(1), -100.0)
 
-        low_n_count_mask = df['revenue_growth_n'] >= 8
-        df['consolidated_score'] = np.where(low_n_count_mask, score_raw.round(1), -100.0)
+        # Avoid division by zero or invalid values: where VP is finite and > 0 compute score, else set sentinel
+        mask_score = (
+                (
+                    np.isfinite(df['growth_quality']) &
+                    np.isfinite(df['recent_momentum']) &
+                    np.isfinite(df['stability_trend']) &
+                    np.isfinite(df['value_pressure'])
+                )
+                & (df['value_pressure'] > 0)
+                & (df['revenue_growth_n'] >= 8)
+            )
+        df['consolidated_score'] = np.where(mask_score, score_raw.round(1), -100.0)
 
         cols_to_update = ['cik', 'consolidated_score','growth_quality', 'recent_momentum', 'stability_trend', 'value_pressure']
         cols_to_update = [c for c in cols_to_update if c in df.columns]
+    
+    if show_df==True:
+        # these are for optimizing algorithm for score
+        df['consolidated_score_d']= np.where(mask_score, score_raw.round(1), -100.0) #debug
+        df['growth_quality_d']= GQ_raw.round(1) #debug
+        df['GC_capped_rev_growth_PCT_d']=capped_rev_growth_PCT #debug
+        df['GC_capped_inc_growth_PCT_d']=capped_inc_growth_PCT #debug
+        df['GC_capped_margin_growth_slope_d']=capped_margin_growth_slope #debug
+        df['GC_revenue_r2_d']=to_num('revenue_r2') #debug
+        df['GC_income_r2_d']=to_num('income_r2') #debug
+        df['GC_margin_r2_d']=to_num('margin_r2') #debug
+        df['GC_income_revenue_ratio_d']=income_revenue_ratio * 10 #debug
+        df['recent_momentum_d'] = RM_raw.round(1)
+        df['RM_capped_rev'] = capped_rev.round(1)
+        df['RM_capped_inc'] = capped_inc.round(1)
+        df['RM_rev_last3q_vs_trend'] = rev_last3q_vs_trend.round(1)
+        df['RM_inc_last3q_vs_trend'] = inc_last3q_vs_trend.round(1)
+        df['stability_trend_d'] = ST_raw.round(1)
+        df['ST_revenue_r2_d']= to_num('revenue_r2') #debug
+        df['ST_income_r2_d']= to_num('income_r2') #debug        
+        df['ST_rev_norm_d']= rev_norm #debug
+        df['ST_inc_norm_d']= inc_norm #debug
+        df['value_pressure_d'] = VP_raw.round(1)
+        df['VP_tpe_d']= tpe #debug
+        df['VP_fpe_d']= fpe #debug
+        df['VP_tps_d']= tps #debug
+        df['VP_loglp_tpe_d']= np.log1p(tpe) #debug
+        df['VP_loglp_fpe_d']= np.log1p(fpe) #debug
+        df['VP_loglp_tps_d']= np.log1p(tps) #debug
 
         df=df.sort_values(by='consolidated_score', ascending=False).reset_index(drop=True)
-        postgres_update(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+        st.dataframe(df, column_config={'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
+                                        'consolidated_score_d': st.column_config.TextColumn(pinned=True),
+                                        'growth_quality_d': st.column_config.TextColumn(pinned=True),
+                                        'recent_momentum_d': st.column_config.TextColumn(pinned=True),
+                                        'stability_trend_d': st.column_config.TextColumn(pinned=True),
+                                        'value_pressure_d': st.column_config.TextColumn(pinned=True),
+                                        }) #debug
+        # --- session state flags (initialize once) ---
+        if 'apply_requested' not in ss:
+            ss.apply_requested = False
+        if 'apply_done' not in ss:
+            ss.apply_done = False
 
-        # st.dataframe(df)
-        # st.stop()
-        # st.stop() #debug
-        # Attach results back to ss.rankings_df (or replace)
-        ss.rankings_df = df
+        # --- form: set request flag on submit ---
+        with st.form('apply_to_db_form'):
+            with color_button('red'):
+                submit = st.form_submit_button("Press this button to Apply to DB")
 
-        # Optional: inspect
-        # print(df[['GQ','RM','ST','VP','score']].head())
+        # When the form is submitted, mark a request (this run only)
+        if submit:
+            ss.apply_requested = True
+            ss.apply_done = False   # reset done if re-requesting
+
+        # Optional: a cancel button to clear the request before it runs
+        if st.button("Cancel apply"):
+            ss.apply_requested = False
+            ss.apply_done = False
+
+        # --- perform the DB update exactly once per request ---
+        if ss.apply_requested and not ss.apply_done:
+            with st.spinner("Applying changes to DB..."):
+                try:
+                    # perform the DB write
+                    postgres_update(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])
+                except Exception as e:
+                    st.error(f"DB update failed: {e}")
+                    # keep apply_requested True so user can retry after fixing issues
+                else:
+                    # only assign after successful write
+                    ss.rankings_df = df
+                    st.success("Saved to DB and updated rankings.")
+                    ss.apply_done = True
+                    # optionally clear the request flag if you want one-shot behavior:
+                    # ss.apply_requested'] = False
+
+        # show status and allow re-run
+        if ss.apply_done:
+            st.info("Last apply completed successfully.")
+            if st.button("Allow another apply"):
+                ss.apply_requested = False
+                ss.apply_done = False
+
+    # if view dataframe was not set to True, update DB and assign to ss.rankings.df
+    postgres_update(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+    ss.rankings_df = df
+    print('exiting compute_value_score_on_df')
     return
 
 
@@ -1037,8 +1046,8 @@ def collect_data_for_company(cik):
         # st.json(yahoo_stats) #debug
         # st.stop()
 
-        result = compute_value_score(company_and_ticker, metrics, trailing_pe,forward_pe,trailing_ps)
-        value_score, growth_quality, recent_momentum, stability_trend, value_pressure = result
+        # result = compute_value_score(company_and_ticker, metrics, trailing_pe,forward_pe,trailing_ps)
+        # value_score, growth_quality, recent_momentum, stability_trend, value_pressure = result
         
         # st.write(result) #debug
 
@@ -1055,11 +1064,11 @@ def collect_data_for_company(cik):
         'trailing_pe' : safe_round(trailing_pe,1),
         'forward_pe' : safe_round(forward_pe,1),
         'trailing_ps' : safe_round(trailing_ps,1),
-        'Consolidated_Score': value_score,
-        'Growth_Quality': growth_quality,
-        'Recent_Momentum': recent_momentum,
-        'Stability_Trend': stability_trend,
-        'Value_Pressure': value_pressure,
+        # 'Consolidated_Score': value_score,
+        # 'Growth_Quality': growth_quality,
+        # 'Recent_Momentum': recent_momentum,
+        # 'Stability_Trend': stability_trend,
+        # 'Value_Pressure': value_pressure,
         'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
         'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
         'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
@@ -1191,61 +1200,11 @@ def update_yahoo_data_for_company(cik):
         'trailing_pe' : safe_round(trailing_pe,1),
         'forward_pe' : safe_round(forward_pe,1),
         'trailing_ps' : safe_round(trailing_ps,1),
-        # 'Consolidated_Score': value_score,
-        # 'Growth_Quality': growth_quality,
-        # 'Recent_Momentum': recent_momentum,
-        # 'Stability_Trend': stability_trend,
-        # 'Value_Pressure': value_pressure,
-        # 'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
-        # 'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
-        # 'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
-        # 'Median_Income_Growth_PCT': safe_round(metrics['median_income_growth'], 2),
-        # 'Median_Margin_Growth_PCT': safe_round(metrics['median_margin_growth'], 2),
-        # 'Median_Margin_PCT': safe_round(metrics['margin_median'], 2),
-        # 'Last3Q_Revenue_Growth_PCT': safe_round(metrics['last_3q_revenue_growth'], 2),
-        # 'Last3Q_Income_Growth_PCT': safe_round(metrics['last_3q_income_growth'], 2),
-        # 'Last3Q_Margin_Growth_PCT': safe_round(metrics['last_3q_margin_growth'], 2),
-        # 'Last3Q_Median_Margin_PCT': safe_round(metrics['last_3q_median_margin'], 2),
-        # 'Last3Q_Income_Positive': int(metrics['last_3q_income_positive_count']),
-        # 'Last6Q_Revenue_Median': int(metrics['last_6q_revenue_median']),
-        # 'Last6Q_Income_Median': int(metrics['last_6q_income_median']),
-        # 'Revenue_Growth_Count': len(metrics['revenue_growth']),
-        # 'Income_Growth_Count': len(metrics['income_growth']),
-        # 'Margin_Growth_Count': len(metrics['margin_growth']),
-        # 'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
-        # 'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
-        # 'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_pct'],2),
-        # 'Revenue_Growth_N': metrics['revenue_n'],
-        # 'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
-        # 'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_outlier_pct'],2),
-        # 'Revenue_R2': safe_round(metrics['revenue_r2'], 4),
-        # 'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
-        # 'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
-        # 'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
-        # 'Income_Growth_PCT': safe_round(metrics['income_growth_pct'],2),
-        # 'Income_Growth_N': metrics['income_n'],
-        # 'Income_Growth_N_Outliers': metrics['income_n_outliers'],
-        # 'Income_Growth_Outlier_PCT': safe_round(metrics['income_outlier_pct'],2),
-        # 'Income_R2': safe_round(metrics['income_r2'], 4),
-        # 'Income_Avg_Residual_Last3': safe_round(metrics['income_avg_residual_last3']/1000, 2),
-        # 'Margin_Growth_Slope': safe_round(metrics['margin_growth_slope'], 4),
-        # 'Margin_Growth_Median': safe_round(metrics['margin_growth_median'], 2),
-        # 'Margin_Growth_N': metrics['margin_n'],
-        # 'Margin_Growth_N_Outliers': metrics['margin_n_outliers'],
-        # 'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
-        # 'Margin_R2': safe_round(metrics['margin_r2'], 4),
-        # 'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
-        # 'last_filing_date': last_filing_date,
-        # 'max_report_date': max_report_date,
         'last_earnings_date': last_earnings_date,
         'next_earnings_date': next_earnings_date,
         'stock_price_update_datetime': stock_price_update_datetime,
         'price_1w_ago': price_1w_ago,
         'pct_chg_from_1w_ago': pct_chg_from_1w_ago,
-        # 'regression_update_datetime': metrics['regression_update_datetime'].floor('s'),
-        # 'price_1m_ago': price_1m_ago,
-        # 'price_6m_ago': price_6m_ago,
-        # 'price_1y_ago': price_1y_ago,
         'company_desc': company_desc
         })
         # st.write(results) #debug 
@@ -2101,11 +2060,11 @@ def show_investment_returns():
     ########################################################################################
     # 1. Define the callback to handle database sync
     def sync_database():
-        state = st.session_state.my_editor
+        state = ss.my_editor
         
         # Handle Deletions
         for row_idx in state['deleted_rows']:
-            row = st.session_state.transaction_df.iloc[row_idx]
+            row = ss.transaction_df.iloc[row_idx]
             postgres_delete_single_transaction(row)
             st.toast(f"Deleted row {row_idx}")
 
@@ -2119,7 +2078,7 @@ def show_investment_returns():
         # Handle Edits
         for row_idx, updated_values in state['edited_rows'].items():
             # Get the original row and update it with the new values
-            row = st.session_state.transaction_df.iloc[row_idx].copy()
+            row = ss.transaction_df.iloc[row_idx].copy()
             for col, val in updated_values.items():
                 row[col] = val
             
@@ -2131,11 +2090,11 @@ def show_investment_returns():
     st.subheader('Transactions to date for viewing/editing:')
 
     # Ensure the DF is in session state
-    if "transaction_df" not in st.session_state:
-        st.session_state.transaction_df = transactions_df
+    if "transaction_df" not in ss:
+        ss.transaction_df = transactions_df
 
     st.data_editor(
-        st.session_state.transaction_df,
+        ss.transaction_df,
         num_rows="dynamic",
         column_config={
             'quantity': st.column_config.NumberColumn("Quantity", step=1),
@@ -2146,77 +2105,6 @@ def show_investment_returns():
         key="my_editor",
         on_change=sync_database # This runs only when a change is committed
     )
-    # st.subheader('Transactions to date for viewing/editing:')
-    # ss.transaction_df = transactions_df
-
-    # if "transaction_df_prev" not in ss:
-    #     ss.transaction_df_prev = ss.transaction_df.copy()
-
-    # edited_df = st.data_editor(
-    #     ss.transaction_df,
-    #     num_rows="dynamic",
-    #     column_config= {
-    #         'quantity': st.column_config.NumberColumn(label="Quantity", step='int'),
-    #         'price': st.column_config.NumberColumn(label="Price", format='dollar'),
-    #         'total': st.column_config.NumberColumn(label="Total Amount", format='dollar')
-    #         },
-    #     hide_index=True,
-    # )
-
-    # # -----------------------------
-    # # DETECT DELETIONS
-    # # -----------------------------
-    # deleted_rows = ss.transaction_df_prev[
-    #     ~ss.transaction_df_prev.apply(tuple, 1).isin(edited_df.apply(tuple, 1))
-    # ]
-
-    # for _, row in deleted_rows.iterrows():
-    #     postgres_delete_single_transaction(row)
-    #     st.toast("Transaction deleted.")
-
-    # # -----------------------------
-    # # DETECT ADDITIONS
-    # # -----------------------------
-    # new_rows = edited_df[
-    #     ~edited_df.apply(tuple, 1).isin(ss.transaction_df_prev.apply(tuple, 1))
-    # ]
-
-    # for _, row in new_rows.iterrows():
-    #     postgres_update(pd.DataFrame([row]), "stock_transactions",
-    #                     primary_key_columns=["cik", "date", "action"])
-    #     st.toast("New transaction added.")
-
-    # # -----------------------------
-    # # DETECT MODIFICATIONS
-    # # -----------------------------
-    # merged = edited_df.merge(ss.transaction_df_prev, indicator=True, how="outer")
-    # modified = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
-
-    # for _, row in modified.iterrows():
-    #     postgres_update(pd.DataFrame([row]), "stock_transactions",
-    #                     primary_key_columns=["cik", "date", "action"])
-    #     st.toast("Transaction updated.")
-
-    # # -----------------------------
-    # # UPDATE SESSION STATE
-    # # -----------------------------
-    # ss.transaction_df = edited_df
-    # ss.transaction_df_prev = edited_df.copy()
-
-    # # after computing deleted_rows, new_rows, modified and after updating ss.transaction_df / ss.transaction_df_prev
-    # has_changes = any(not df.empty for df in (deleted_rows, new_rows, modified))
-    
-    # if has_changes:
-    #     st.write(has_changes, deleted_rows, new_rows, modified) #debug
-    #     st.stop()
-    #     ss.transaction_df = edited_df
-    #     ss.transaction_df_prev = edited_df.copy()
-    #     deleted_rows = pd.DataFrame(columns=ss.transaction_df_prev.columns)
-    #     new_rows = pd.DataFrame(columns=ss.transaction_df_prev.columns)
-    #     modified = pd.DataFrame(columns=ss.transaction_df_prev.columns)
-    # else:
-    #     # nothing changed; stop this run
-    #     st.stop()
         
 def reset_show_modal():
     ss.transaction_show_modal = False
@@ -2268,11 +2156,7 @@ def transaction_show_modal():
         return
 
 def display_stock_analysis_form(stock_growth_analysis_df):
-    # with color_button('green'):
-    #     enter_transaction_btn = st.button('Enter Stock Buy/Sell Transaction')
-    # if enter_transaction_btn:
-    #     ss.show_transaction_form=True
-    #     st.rerun()
+
     print("entering into display_stock_analysis_form function")
 
     if ss.rerun_the_application==True:
@@ -2541,6 +2425,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     if ss.column_include_regression == False:
         extra_column_set = set(extra_columns)
         columns = ['chart','action']+[c for c in columns if c not in extra_column_set]
+    else:
+        columns = ['chart','action']+[c for c in columns]
     
     # ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
     # st.write(f"ss.sort_column={ss.sort_column}") #ss.editable_stock_growth_analysis_df) #debug
@@ -2654,7 +2540,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                     st.warning(f'Change failed due to {e}')
 
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
-                ,hide_index=True
+                # ,hide_index=True
                 ,column_config= {
                 'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
@@ -2713,19 +2599,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         
     print("at end of display_stock_analysis_form function")
 
-    # # read result
-    # if "modal_result" in st.session_state:
-    #     st.write("Saved:", st.session_state["modal_result"])
-
-    # selection = ss.get("row_select", {})
-    # selected_rows = selection.get("rows", [])
-    # if selected_rows:
-    #     row_idx = selected_rows[0]
-    #     row = styled.iloc[row_idx]
-    #     cik = row["cik"]
-    #     ss.selected_company=cik
-    #     # name = row["company_and_ticker"]
-           
     if ss.selected_company is not None:
         cik = ss.selected_company
         # display_stock_analysis_form()
@@ -2806,7 +2679,7 @@ def main():
             investment_returns_btn = st.button("Show Investment Returns")
         if ss.admin_buttons==False:
             with color_button("red"):
-                admin_btn=st.button("Show admin buttons")
+                admin_btn=st.button("Show ADMIN Options")
         if ss.admin_buttons==True:
             with color_button("red"):
                 load_full_sec_btn = st.button("Load Full Historical Financial Data from SEC (All Companies) - takes 2+ hours")
@@ -2830,7 +2703,7 @@ def main():
         st.rerun()
 
     if calc_new_score_btn:
-        compute_value_score_on_df()
+        compute_value_score_on_df(show_df=True)
 
     if view_stock_analysis_form_btn:
         reset_forms_ss_vars()
