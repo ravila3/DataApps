@@ -879,9 +879,9 @@ def compute_value_score_on_df(show_df=False):
         inc_last3q_vs_trend=inc_last3_residuals/inc_denom* 1000*(capped_inc_growth_PCT+100)*to_num('income_r2')/6
         
         # RM_raw = 0.10 * capped_rev + 0.10 * capped_inc - 3 * (3 - to_num('last3q_income_positive'))
-        RM_raw = (0.10 * capped_rev + 0.05 * capped_inc 
-            + 0.5 * rev_last3q_vs_trend
-            + 0.5 * inc_last3q_vs_trend
+        RM_raw = (0.10 * capped_rev + 0.10 * capped_inc 
+            + 1.0 * rev_last3q_vs_trend
+            + 1.0 * inc_last3q_vs_trend
             - 3 * (3 - to_num('last3q_income_positive'))
             )
 
