@@ -9,7 +9,7 @@ from altair.expr import *
 from SEC_Edgar_Loader import sec_edgar_financial_load,get_company_tickers_df, load_daily_SEC_submission_index
 import numpy as np
 import sys, linecache, traceback
-from stock_data_loader_utilities import postgres_update, postgres_read,yahoo_finance_load,yahoo_finance_df_format
+from stock_data_loader_utilities import postgres_update_bulk, postgres_read,yahoo_finance_load,yahoo_finance_df_format
 from datetime import date
 import uuid
 import math
@@ -65,6 +65,9 @@ if "quarterly_financials" not in ss:
     ss.filter_sector = None
     ss.sort_column = 'Consolidated_Score'
     ss.sort_direction = 'Desc'
+    ss.compute_value_score=False
+    ss.apply_scores_requested=False
+    ss.apply_scores_done=False
 
 if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
@@ -104,6 +107,8 @@ def reset_forms_ss_vars():
     ss.sort_column = 'Consolidated_Score'
     ss.sort_direction = 'Desc'
     ss.prev_edits={}
+    ss.apply_scores_requested=False
+    ss.apply_scores_done=False
     return
 
 def safe_divide(x, n=1):
@@ -730,7 +735,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         # st.stop()
         if metrics_to_update != None:
             temp_df = pd.DataFrame([metrics_to_update])
-            postgres_update(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+            postgres_update_bulk(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
             # st.write('temp_df',temp_df) #debug
     except Exception as e:
         st.write(f"failed to write regression results: {e}")
@@ -787,6 +792,24 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
     # st.stop() #debug
     return metrics
 
+def missing_penalty_vec(missing_frac, N, *, alpha=3.5, k=1.8, N0=3.0, max_penalty=1.0):
+    """
+    Vectorized penalty. missing_frac and N may be scalars or array-like (Series, ndarray).
+    Returns ndarray of penalties in [0, max_penalty].
+    """
+    m = np.asarray(missing_frac, dtype=float)
+    n = np.asarray(N, dtype=float)
+
+    # guard shapes: broadcastable arrays are fine
+    m = np.clip(m, 0.0, 1.0)
+    n = np.maximum(n, 0.0)
+
+    size_factor = 1.0 + k * (N0 / (n + N0))
+    penalty = (m ** alpha) * size_factor
+    penalty = np.clip(penalty, 0.0, max_penalty)
+    return penalty
+
+
 def compute_value_score_on_df(show_df=False):
     
     print('starting compute_value_score_on_df')
@@ -800,33 +823,48 @@ def compute_value_score_on_df(show_df=False):
         def to_num(col):
             return pd.to_numeric(df[col], errors="coerce")
 
-        # --- Growth Quality (GQ) ---
+        # --- Growth Quality (GQ) --------------------------------------------------------------------------------
+ 
         capped_rev_growth_PCT = to_num('revenue_growth_pct').clip(upper=100,lower=-100)
         capped_inc_growth_PCT = np.minimum(to_num('income_growth_pct'), 2 * capped_rev_growth_PCT)
         capped_margin_growth_slope = to_num('margin_growth_slope').clip(upper=10)
 
         ratio = df['last6q_income_median'] / df['last6q_revenue_median']
         ratio = ratio.replace([np.inf, -np.inf], np.nan)
-
+        
         # mask: income negative AND revenue magnitude above absolute threshold
         mask_income_revenue_ratio = (df['last6q_income_median'] < 0) & (df['last6q_revenue_median'].abs() > 500000)
-        income_revenue_ratio = ratio.where(mask_income_revenue_ratio, 0.0).fillna(0.0)
+        income_revenue_ratio = ratio.where(mask_income_revenue_ratio, 0.0).fillna(0.0).clip(lower=-2.5,upper=0.0)
 
         # fill other NaNs with 0.0 (or choose different policy)
         # df_f = df.fillna({c: 0.0 for c in cols})
+        max_n_count=(df['revenue_growth_n']).max()
+        rev_n = pd.to_numeric(df['revenue_growth_n'],errors='coerce').fillna(0).clip(lower=0)
+        rev_presence = (rev_n / float(max_n_count)).clip(0.0,1.0)
+        rev_missing_frac = 1.0-rev_presence
+        rev_penalty_arr = missing_penalty_vec(rev_missing_frac.values, rev_n,alpha=3.5, k=1.8, N0=3.0, max_penalty=0.6)
+        rev_n_count_penalty = pd.Series(rev_penalty_arr, index=df.index)
+
+        inc_n = pd.to_numeric(df['income_growth_n'],errors='coerce').fillna(0).clip(lower=0)
+        inc_presence = (inc_n / float(max_n_count)).clip(0.0,1.0)
+        inc_missing_frac = 1.0-inc_presence
+        inc_penalty_arr = missing_penalty_vec(inc_missing_frac.values, inc_n,alpha=3.5, k=1.8, N0=3.0, max_penalty=0.6)
+        inc_n_count_penalty = pd.Series(inc_penalty_arr, index=df.index)
 
         GQ_raw = (
-            2 * (capped_rev_growth_PCT * to_num('revenue_r2'))
-            + 1.4 * (capped_inc_growth_PCT * to_num('income_r2'))
+            (4 * (capped_rev_growth_PCT * to_num('revenue_r2') * (1.0-rev_n_count_penalty))
+            + 4 * (capped_inc_growth_PCT * to_num('income_r2') * (1.0-inc_n_count_penalty))
             + 0.5 * (capped_margin_growth_slope * to_num('margin_r2'))
-            + 10 * income_revenue_ratio
+            )
+            * (1-abs(income_revenue_ratio/2.5) #10 * income_revenue_ratio
+               ) 
             - 0.1 * (to_num('revenue_growth_outlier_pct') + to_num('income_growth_outlier_pct'))
         )
 
         GQ_raw = np.where(df['revenue_growth_n'] < 8, -100.0, GQ_raw)
         df['growth_quality'] = GQ_raw.round(1)
 
-        # --- Recent Momentum (RM) ---
+        # --- Recent Momentum (RM) -------------------------------------------------------------------------------------
         
         rev = to_num('last3q_revenue_growth_pct')
         inc = to_num('last3q_income_growth_pct')
@@ -849,7 +887,7 @@ def compute_value_score_on_df(show_df=False):
 
         df['recent_momentum'] = RM_raw.round(1)
 
-        # --- Stability (ST) ---
+        # --- Stability (ST) -------------------------------------------------------------------------------------
 
         rev_norm_raw = to_num('revenue_avg_residual_last3') / rev_denom * 1000
         inc_norm_raw = to_num('income_avg_residual_last3') / inc_denom * 1000
@@ -857,30 +895,30 @@ def compute_value_score_on_df(show_df=False):
         rev_norm = rev_norm_raw.abs().clip(upper=1)
         inc_norm = inc_norm_raw.abs().clip(upper=1)
         
-        ST_raw = 4 * to_num('revenue_r2') + 4 * to_num('income_r2') - 4 * rev_norm - 2 * inc_norm
+        ST_raw = 2.0 * to_num('revenue_r2') + 2.0 * to_num('income_r2') - 1.0 * rev_norm - 1.0 * inc_norm
         # ST_raw = 2 * to_num('revenue_r2') + 2 * to_num('income_r2') - 1.5 * rev_norm - 1.5 * inc_norm
 
         df['stability_trend'] = ST_raw.round(1).clip(lower=0)
 
-        # --- Valuation Pressure (VP) ---
+        # --- Valuation Pressure (VP) -------------------------------------------------------------------------------------
         
         # Coerce P/E and P/S to numeric, treat negatives as 0, cap trailing PE at 500
         tpe = pd.to_numeric(df.get('trailing_pe', pd.Series(dtype=float)), errors='coerce').fillna(0)
         tpe = tpe.where(tpe >= 0, 0).clip(upper=300)
-        tpe_component = 5*np.log1p(tpe) 
+        tpe_component = tpe # 5*np.log1p(tpe) 
 
         fpe = pd.to_numeric(df.get('forward_pe', pd.Series(dtype=float)), errors='coerce').fillna(0)
         fpe = fpe.where(fpe >= 0, 0)
-        fpe_component = 5*np.log1p(fpe)
+        fpe_component = 1.5*fpe # 5*np.log1p(fpe)
 
         tps = pd.to_numeric(df.get('trailing_ps', pd.Series(dtype=float)), errors='coerce').fillna(0)
         tps = tps.where(tps >= 0, 0)
-        tps_component = 20*np.log1p(tps)
+        tps_component = 12*tps # 20*np.log1p(tps)
         
         price_ratio_components = pd.concat([tpe_component,np.maximum(fpe_component,tps_component)],axis=1)
         price_ratio_components = price_ratio_components.where(price_ratio_components > 0, np.nan)
 
-        VP_raw=price_ratio_components.mean(axis=1, skipna=True)
+        VP_raw=price_ratio_components.min(axis=1, skipna=True)
         VP_raw = VP_raw.fillna(30.0)
         VP_raw = VP_raw.clip(lower=2.0)
 
@@ -892,7 +930,8 @@ def compute_value_score_on_df(show_df=False):
         VP_raw = VP_raw.where(~no_price_info, -100)
         df['value_pressure'] = VP_raw.round(1)
 
-        # --- Final Score ---
+        # --- Final Score -------------------------------------------------------------------------------------
+        
         score_raw = ((df['growth_quality'] + df['recent_momentum']) * df['stability_trend']) / df['value_pressure']
 
         # Avoid division by zero or invalid values: where VP is finite and > 0 compute score, else set sentinel
@@ -915,13 +954,15 @@ def compute_value_score_on_df(show_df=False):
         # these are for optimizing algorithm for score
         df['consolidated_score_d']= np.where(mask_score, score_raw.round(1), -100.0) #debug
         df['growth_quality_d']= GQ_raw.round(1) #debug
-        df['GC_capped_rev_growth_PCT_d']=capped_rev_growth_PCT #debug
-        df['GC_capped_inc_growth_PCT_d']=capped_inc_growth_PCT #debug
-        df['GC_capped_margin_growth_slope_d']=capped_margin_growth_slope #debug
-        df['GC_revenue_r2_d']=to_num('revenue_r2') #debug
-        df['GC_income_r2_d']=to_num('income_r2') #debug
-        df['GC_margin_r2_d']=to_num('margin_r2') #debug
-        df['GC_income_revenue_ratio_d']=income_revenue_ratio * 10 #debug
+        df['GC_capped_rev_growth_PCT_d']=capped_rev_growth_PCT.round(1) #debug
+        df['GC_capped_inc_growth_PCT_d']=capped_inc_growth_PCT.round(1) #debug
+        df['GC_capped_margin_growth_slope_d']=capped_margin_growth_slope.round(1) #debug
+        df['GC_revenue_r2_d']=to_num('revenue_r2').round(2) #debug
+        df['GC_income_r2_d']=to_num('income_r2').round(2) #debug
+        df['GC_margin_r2_d']=to_num('margin_r2').round(2) #debug
+        df['GC_rev_n_count_penalty']=rev_n_count_penalty.round(2) #debug
+        df['GC_inc_n_count_penalty']=inc_n_count_penalty.round(2) #debug
+        df['GC_income_revenue_ratio_d']=income_revenue_ratio.round(2) #debug
         df['recent_momentum_d'] = RM_raw.round(1)
         df['RM_capped_rev'] = capped_rev.round(1)
         df['RM_capped_inc'] = capped_inc.round(1)
@@ -942,17 +983,17 @@ def compute_value_score_on_df(show_df=False):
 
         df=df.sort_values(by='consolidated_score', ascending=False).reset_index(drop=True)
         st.dataframe(df, column_config={'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
-                                        'consolidated_score_d': st.column_config.TextColumn(pinned=True),
-                                        'growth_quality_d': st.column_config.TextColumn(pinned=True),
-                                        'recent_momentum_d': st.column_config.TextColumn(pinned=True),
-                                        'stability_trend_d': st.column_config.TextColumn(pinned=True),
-                                        'value_pressure_d': st.column_config.TextColumn(pinned=True),
+                                        'consolidated_score_d': st.column_config.NumberColumn(pinned=True),
+                                        'growth_quality_d': st.column_config.NumberColumn(pinned=True),
+                                        'recent_momentum_d': st.column_config.NumberColumn(pinned=True),
+                                        'stability_trend_d': st.column_config.NumberColumn(pinned=True),
+                                        'value_pressure_d': st.column_config.NumberColumn(pinned=True),
                                         }) #debug
         # --- session state flags (initialize once) ---
-        if 'apply_requested' not in ss:
-            ss.apply_requested = False
-        if 'apply_done' not in ss:
-            ss.apply_done = False
+        if 'apply_scores_requested' not in ss:
+            ss.apply_scores_requested = False
+        if 'apply_scores_done' not in ss:
+            ss.apply_scores_done = False
 
         # --- form: set request flag on submit ---
         with st.form('apply_to_db_form'):
@@ -961,43 +1002,42 @@ def compute_value_score_on_df(show_df=False):
 
         # When the form is submitted, mark a request (this run only)
         if submit:
-            ss.apply_requested = True
-            ss.apply_done = False   # reset done if re-requesting
-
-        # Optional: a cancel button to clear the request before it runs
-        if st.button("Cancel apply"):
-            ss.apply_requested = False
-            ss.apply_done = False
+            ss.apply_scores_requested = True
+            ss.apply_scores_done = False   # reset done if re-requesting
 
         # --- perform the DB update exactly once per request ---
-        if ss.apply_requested and not ss.apply_done:
+        if ss.apply_scores_requested and not ss.apply_scores_done:
             with st.spinner("Applying changes to DB..."):
                 try:
                     # perform the DB write
-                    postgres_update(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])
+                    postgres_update_bulk(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])
+                    st.toast("Scores saved to DB")
                 except Exception as e:
                     st.error(f"DB update failed: {e}")
-                    # keep apply_requested True so user can retry after fixing issues
-                else:
-                    # only assign after successful write
-                    ss.rankings_df = df
-                    st.success("Saved to DB and updated rankings.")
-                    ss.apply_done = True
-                    # optionally clear the request flag if you want one-shot behavior:
-                    # ss.apply_requested'] = False
+                    # keep apply_scores_requested True so user can retry after fixing issues
+        if ss.apply_scores_done:
+            # only assign after successful write
+            st.success("Saved to DB and updated rankings.")
+            ss.apply_scores_requested = ss.apply_scores_done = False
+            ss.rankings_df = ss.rankings_df.iloc[0,0]
+            st.rerun()
+            # optionally clear the request flag if you want one-shot behavior:
+            # ss.apply_scores_requested'] = False
 
-        # show status and allow re-run
-        if ss.apply_done:
-            st.info("Last apply completed successfully.")
-            if st.button("Allow another apply"):
-                ss.apply_requested = False
-                ss.apply_done = False
-
+        # # show status and allow re-run
+        # if ss.apply_scores_done:
+        #     st.info("Last apply completed successfully.")
+        #     if st.button("Allow another apply"):
+        #         ss.apply_scores_requested = False
+        #         ss.apply_scores_done = False
+    else:
     # if view dataframe was not set to True, update DB and assign to ss.rankings.df
-    postgres_update(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-    ss.rankings_df = df
-    print('exiting compute_value_score_on_df')
-    return
+        postgres_update_bulk(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+        ss.rankings_df = ss.rankings_df.iloc[0,0]
+        ss.view_stock_analysis_form=True
+        st.rerun()
+        print('exiting compute_value_score_on_df')
+        return
 
 
 #Note that ss.quarterly_financials must be loaded for this to function
@@ -1270,7 +1310,7 @@ def rank_companies_by_growth_and_update_DB(cik_list):
             # st.stop()
             if results_for_cik != None:
                 temp_df = pd.DataFrame([results_for_cik])
-                postgres_update(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
+                postgres_update_bulk(temp_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
                 results.append(results_for_cik)
                 total_updated += 1
                 print('Saved updates to DB')
@@ -1559,7 +1599,7 @@ def write_sec_data_into_db(load_type):
                 for pretty, spec in column_specs.items()
             })
             
-            postgres_update(df_pg, 'stock_quarterly_financials_sec', ['cik','fiscal_timeframe'])  # Save quarterly data with metrics to PostgreSQL
+            postgres_update_bulk(df_pg, 'stock_quarterly_financials_sec', ['cik','fiscal_timeframe'])  # Save quarterly data with metrics to PostgreSQL
         except Exception as e:
             error=error+1
             st.write(f"Failed to load and write SEC data for {company_and_ticker}: {e}")
@@ -1623,7 +1663,7 @@ def read_or_create_editable_table():
 
         # st.write(editable_df)  # debug
         # Save the new DataFrame to the database
-        postgres_update(editable_df, 'editable_stock_data', ['cik'])
+        postgres_update_bulk(editable_df, 'editable_stock_data', ['cik'])
     
     return editable_df
 
@@ -1721,7 +1761,7 @@ def enter_stock_transaction():
                 "total": quantity * price,
             }
 
-            postgres_update(pd.DataFrame([new_row]), "stock_transactions",
+            postgres_update_bulk(pd.DataFrame([new_row]), "stock_transactions",
                             primary_key_columns=["cik", "date", "action"])
 
             ss.transaction_df = pd.concat([ss.transaction_df, pd.DataFrame([new_row])], ignore_index=True)
@@ -1766,7 +1806,7 @@ def enter_stock_transaction():
     ]
 
     for _, row in new_rows.iterrows():
-        postgres_update(pd.DataFrame([row]), "stock_transactions",
+        postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",
                         primary_key_columns=["cik", "date", "action"])
         st.toast("New transaction added.")
 
@@ -1777,7 +1817,7 @@ def enter_stock_transaction():
     modified = merged[merged["_merge"] == "left_only"].drop(columns=["_merge"])
 
     for _, row in modified.iterrows():
-        postgres_update(pd.DataFrame([row]), "stock_transactions",
+        postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",
                         primary_key_columns=["cik", "date", "action"])
         st.toast("Transaction updated.")
 
@@ -1839,7 +1879,7 @@ def update_primary_filter_session_value(key):
 def show_investment_returns():
     print("entering into show_investment_returns function")
     transactions_df=load_stock_transactions_from_db()
-    ss.rankings_df=load_stock_growth_analysis_data_from_db()
+    ss.rankings_df =load_stock_growth_analysis_data_from_db()
     transaction_profit_df = transactions_df.merge(
         ss.rankings_df[['cik', 'ticker', 'stock_price']], on='cik', how='left'
         ).rename(columns={'stock_price': 'current_price'})
@@ -2071,7 +2111,7 @@ def show_investment_returns():
         # Handle Additions
         for row_dict in state['added_rows']:
             new_row_df = pd.DataFrame([row_dict])
-            postgres_update(new_row_df, "stock_transactions", 
+            postgres_update_bulk(new_row_df, "stock_transactions", 
                             primary_key_columns=["cik", "date", "action"])
             st.toast("New transaction added.")
 
@@ -2082,7 +2122,7 @@ def show_investment_returns():
             for col, val in updated_values.items():
                 row[col] = val
             
-            postgres_update(pd.DataFrame([row]), "stock_transactions",
+            postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",
                             primary_key_columns=["cik", "date", "action"])
             st.toast(f"Updated row {row_idx}")
 
@@ -2144,7 +2184,7 @@ def transaction_show_modal():
         # st.stop() #debug
         
         try:
-            postgres_update(pd.DataFrame([new_row]), "stock_transactions",
+            postgres_update_bulk(pd.DataFrame([new_row]), "stock_transactions",
                             primary_key_columns=["cik", "date", "action"])
             st.toast("Wrote transaction to DB successfully")
         except Exception as e:
@@ -2178,13 +2218,14 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 
     # st.write("**Stock Growth Analysis Data:**")
     # st.write(len(ss.editable_stock_growth_analysis_df)) # debug
-    if ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty or len(ss.rankings_df) == 0:
+    if len(ss.editable_stock_growth_analysis_df) == 0 or ss.editable_stock_growth_analysis_df.empty or len(ss.rankings_df) or ss.rankings_df.empty == 0:
+        ss.rankings_df = load_stock_growth_analysis_data_from_db()
         column_specs=get_column_specs_results_df()
         rename_map = {
             spec["pg_name"]: pretty
             for pretty, spec in column_specs.items()
         }
-        ss.rankings_df = stock_growth_analysis_df.rename(columns=rename_map)
+        ss.rankings_df = ss.rankings_df.rename(columns=rename_map)
         
         # integrate transaction quantities
         tx=load_stock_transactions_from_db()
@@ -2261,7 +2302,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
                 ,'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT'
-                ,'Consolidated_Score','Growth_Quality','Recent_Momentum'
+                ,'Consolidated_Score','Growth_Quality','Stability_Trend','Recent_Momentum'
             ]
         cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
         cols_for_color_dec = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
@@ -2330,6 +2371,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         """,
         unsafe_allow_html=True,
     )
+    # st.write("ss.editable_stock_growth_analysis_df",ss.editable_stock_growth_analysis_df) #debug
     
     with st.expander("Expand to show filters", key="temp_filters_expanded", on_change=update_primary_filter_session_value, args=("filters_expanded",)):
         col1, col2 = st.columns(2)
@@ -2447,10 +2489,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         cik_list = ss.filtered_df['cik'].tolist()   
         rank_companies_by_growth_and_update_DB(cik_list)
         ss.rankings_df = ss.rankings_df.iloc[0:0]
-        # with st.spinner(f"Saving Analysis Results to DB"):
-        #     postgres_update(results_df, 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
-        #     ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.iloc[0:0]
-        #     st.toast('Updated stock_growth_analysis_results on DB')
         ss.view_stock_analysis_form=True
         st.rerun()
 
@@ -2523,7 +2561,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 update_df['category']=new_category
 
                 try:
-                    postgres_update(update_df, 'editable_stock_data', ['cik']) 
+                    postgres_update_bulk(update_df, 'editable_stock_data', ['cik']) 
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
@@ -2534,7 +2572,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 update_df['notes']=new_notes
 
                 try:
-                    postgres_update(update_df, 'editable_stock_data', ['cik']) 
+                    postgres_update_bulk(update_df, 'editable_stock_data', ['cik']) 
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
@@ -2596,9 +2634,20 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     # # open the modal
     if ss.transaction_show_modal == True:
         transaction_show_modal()
+    
+    if ss.admin_buttons==True:
+        with color_button('red'):
+            calc_scores_btn=st.button('Calculate Revised Value Scoring')
         
-    print("at end of display_stock_analysis_form function")
+        if calc_scores_btn:
+            ss.compute_value_score=True
+            # ss.rankings_df = ss.rankings_df.iloc[0,0]
+            # compute_value_score_on_df(show_df=True)
 
+    if ss.compute_value_score==True:
+        # st.write(f"ss.apply_scores_requested={ss.apply_scores_requested}, ss.apply_scores_done={ss.apply_scores_done}") #debug        
+        compute_value_score_on_df(show_df=True)
+    
     if ss.selected_company is not None:
         cik = ss.selected_company
         # display_stock_analysis_form()
@@ -2610,7 +2659,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     if return_menu2_btn:
         reset_forms_ss_vars()
         st.rerun()
-    print("exiting into display_stock_analysis_form function")
+    print("at end of display_stock_analysis_form function")
+    return
 
 # set page config and title
 st.set_page_config( page_title="Stock Screener", layout="wide" )
@@ -2717,7 +2767,7 @@ def main():
         write_sec_data_into_db('incremental')
         
     if ss.load_sec_incremental_filings == True:
-        ss.rankings_df=load_stock_growth_analysis_data_from_db()
+        ss.rankings_df =load_stock_growth_analysis_data_from_db()
         st.write("Incremental Load Completed Successfully for New SEC Filings")
         reset_forms_ss_vars()
         ss.view_stock_analysis_form=True
@@ -2730,7 +2780,7 @@ def main():
         write_sec_data_into_db('full')
 
     if ss.load_sec_full_filings == True:
-        ss.rankings_df=load_stock_growth_analysis_data_from_db()
+        ss.rankings_df =load_stock_growth_analysis_data_from_db()
         st.write("Full Load Completed Successfully for SEC Filings")
         reset_forms_ss_vars()
         ss.view_stock_analysis_form=True

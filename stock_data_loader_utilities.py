@@ -16,6 +16,11 @@ from snowflake.connector.pandas_tools import write_pandas
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from sqlalchemy import create_engine
+import re
+import math
+from typing import List, Optional
+from psycopg2 import sql, OperationalError, errors
+from psycopg2.extras import execute_values
 
 ss = st.session_state
 
@@ -374,6 +379,219 @@ def postgres_update(df, table_name, primary_key_columns=None):
 
     # st.write(f"Upsert complete: {len(df)} rows processed.")
     return
+
+def postgres_update_bulk(
+    df: pd.DataFrame,
+    table_name: str,
+    primary_key_columns: Optional[List[str]] = None,
+    run_grant: bool = False,
+    grant_role: str = "ravila3",
+    chunk_size: int = 1000,
+    max_retries: int = 5,
+    retry_backoff: float = 0.1,
+):
+    """
+    Bulk upsert a DataFrame into PostgreSQL.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Data to upsert. Column names will be sanitized to safe SQL identifiers.
+    table_name : str
+        Target table name (unquoted). Will be quoted safely.
+    primary_key_columns : list[str] or None
+        List of column names (after sanitization) that form the primary key.
+        If provided, a PRIMARY KEY clause will be added when creating the table.
+    run_grant : bool
+        If True, run a GRANT ALL PRIVILEGES ON TABLE ... TO <grant_role>.
+        This is executed in autocommit mode and is optional (default False).
+    grant_role : str
+        Role to grant privileges to when run_grant is True.
+    chunk_size : int
+        Number of rows per execute_values call.
+    max_retries : int
+        Number of retries for transient concurrency errors.
+    retry_backoff : float
+        Initial backoff in seconds for retries (exponential backoff applied).
+    """
+
+    # --- helpers ---
+    def sanitize_column_name(col: str) -> str:
+        col = str(col).lower()
+        col = re.sub(r"[^a-z0-9]+", "_", col)
+        col = re.sub(r"_+", "_", col)
+        return col.strip("_")
+
+    def to_python_scalar(x):
+        # Convert pandas / numpy types to Python-native values for psycopg2
+        if pd.isna(x):
+            return None
+        if isinstance(x, (np.integer,)):
+            return int(x)
+        if isinstance(x, (np.floating,)):
+            # convert NaN/inf to None
+            if math.isfinite(float(x)):
+                return float(x)
+            return None
+        if isinstance(x, (pd.Timestamp,)):
+            return x.to_pydatetime()
+        return x
+
+    # --- connection params from Streamlit secrets ---
+    connection_params = {
+        "user": st.secrets["postgres_financial_data"]["user"],
+        "host": st.secrets["postgres_financial_data"]["host"],
+        "port": st.secrets["postgres_financial_data"]["port"],
+        "database": st.secrets["postgres_financial_data"]["database"],
+        "password": st.secrets["postgres_financial_data"]["password"],
+    }
+
+    # Work on a copy and sanitize column names
+    df = df.copy()
+    original_columns = list(df.columns)
+    sanitized = [sanitize_column_name(c) for c in original_columns]
+    df.columns = sanitized
+
+    # Validate primary keys
+    if primary_key_columns:
+        # sanitize provided PK names as well (user may pass original names)
+        pk_sanitized = [sanitize_column_name(pk) for pk in primary_key_columns]
+        for pk in pk_sanitized:
+            if pk not in df.columns:
+                raise ValueError(f"Primary key column '{pk}' not found in DataFrame after sanitization")
+        primary_key_columns = pk_sanitized
+
+    # Replace pandas missing values with None
+    df = df.where(pd.notnull(df), None)
+
+    # Convert datetime-like columns to python datetimes
+    for col, dtype in df.dtypes.items():
+        if "datetime" in str(dtype) or str(dtype).startswith("datetime64"):
+            df[col] = df[col].apply(lambda v: None if v is None else (v.to_pydatetime() if isinstance(v, pd.Timestamp) else v))
+
+    # Replace string 'Infinity' and infinite numeric values with None
+    df = df.replace("Infinity", None)
+    df = df.replace([np.inf, -np.inf], None)
+
+    # Add last_modified column (UTC)
+    df["last_modified"] = pd.Timestamp.utcnow()
+
+    # Simple dtype mapping for CREATE TABLE
+    dtype_map = {
+        "int64": "BIGINT",
+        "float64": "DOUBLE PRECISION",
+        "object": "TEXT",
+        "bool": "BOOLEAN",
+        "datetime64[ns]": "TIMESTAMP",
+    }
+
+    # Build CREATE TABLE statement safely using psycopg2.sql
+    columns = list(df.columns)
+    column_defs = []
+    for col in columns:
+        dtype = str(df[col].dtype)
+        pg_type = dtype_map.get(dtype, "TEXT")
+        column_defs.append(sql.SQL("{} {}").format(sql.Identifier(col), sql.SQL(pg_type)))
+
+    if primary_key_columns:
+        pk_clause = sql.SQL("PRIMARY KEY ({})").format(sql.SQL(", ").join(map(sql.Identifier, primary_key_columns)))
+        column_defs.append(pk_clause)
+
+    create_table_sql = sql.SQL("CREATE TABLE IF NOT EXISTS {table} ({cols});").format(
+        table=sql.Identifier(table_name),
+        cols=sql.SQL(", ").join(column_defs),
+    )
+
+    # Build upsert SQL template (identifiers safely quoted)
+    cols_ident = sql.SQL(", ").join(map(sql.Identifier, columns))
+    placeholders = sql.SQL(", ").join(sql.Placeholder() * len(columns))
+
+    # Build update assignments excluding PKs and last_modified
+    update_cols = [c for c in columns if (not primary_key_columns or c not in primary_key_columns) and c != "last_modified"]
+    if update_cols:
+        update_assignments = sql.SQL(", ").join(
+            sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(c), sql.Identifier(c)) for c in update_cols
+        )
+        update_clause = sql.SQL(", ").join([update_assignments, sql.SQL("last_modified = NOW()")])
+    else:
+        update_clause = sql.SQL("last_modified = NOW()")
+
+    conflict_clause = sql.SQL(", ").join(map(sql.Identifier, primary_key_columns)) if primary_key_columns else sql.SQL("")
+
+    insert_sql = sql.SQL(
+        "INSERT INTO {table} ({cols}) VALUES %s ON CONFLICT ({conflict_cols}) DO UPDATE SET {update_clause}"
+    ).format(
+        table=sql.Identifier(table_name),
+        cols=cols_ident,
+        conflict_cols=conflict_clause,
+        update_clause=update_clause,
+    )
+
+    # Connect and execute
+    conn = None
+    try:
+        conn = psycopg2.connect(**connection_params)
+        cur = conn.cursor()
+
+        # Create table if needed
+        cur.execute(create_table_sql)
+
+        # Optionally run GRANT in autocommit mode (do not mix with DML transaction)
+        if run_grant:
+            conn.autocommit = True
+            try:
+                with conn.cursor() as grant_cur:
+                    grant_cur.execute(sql.SQL("GRANT ALL PRIVILEGES ON TABLE {} TO {}").format(
+                        sql.Identifier(table_name),
+                        sql.Identifier(grant_role)
+                    ))
+            finally:
+                conn.autocommit = False
+
+        # Prepare rows as tuples of Python scalars
+        rows = []
+        for row in df[columns].itertuples(index=False, name=None):
+            rows.append(tuple(to_python_scalar(x) for x in row))
+
+        # Chunked execute_values with retry on transient concurrency errors
+        total = 0
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            attempt = 0
+            backoff = retry_backoff
+            while True:
+                try:
+                    execute_values(cur, insert_sql.as_string(conn), chunk, page_size=len(chunk))
+                    conn.commit()
+                    total += len(chunk)
+                    break
+                except Exception as exc:
+                    # Detect transient concurrency error
+                    msg = str(exc).lower()
+                    is_transient = False
+                    if isinstance(exc, errors.InternalError) and "tuple concurrently updated" in msg:
+                        is_transient = True
+                    if isinstance(exc, OperationalError) or is_transient:
+                        attempt += 1
+                        conn.rollback()
+                        if attempt > max_retries:
+                            raise
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    # non-transient -> re-raise
+                    conn.rollback()
+                    raise
+
+        cur.close()
+        return None #{"rows_upserted": total, "table": table_name}
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 def postgres_write(df, table_name, primary_key_column=None):
     # Build connection params
