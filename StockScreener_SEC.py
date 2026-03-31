@@ -2610,7 +2610,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     if return_menu2_btn:
         reset_forms_ss_vars()
         st.rerun()
-print("entering into display_stock_analysis_form function")
+    print("exiting into display_stock_analysis_form function")
 
 # set page config and title
 st.set_page_config( page_title="Stock Screener", layout="wide" )
