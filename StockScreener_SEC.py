@@ -347,7 +347,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                - updated_quarterly_df: Original df with growth columns added
                - metrics_dict: Growth metrics including regression analysis
     """
-    print('Starting analyze_yoy_growth function')
+    print(f'Starting analyze_yoy_growth function, len(ss.rankings_df)={len(ss.rankings_df)}')
     
     try:
         if quarterly_df.empty or len(quarterly_df) < 8:  # Need at least 2 years of data
@@ -803,7 +803,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         st.write(error_text)
         print(error_text)
         logging.error(error_text) #debug
-    print("at end of analyze_yoy_growth function")
+    print(f"at end of analyze_yoy_growth function, len(ss.rankings_df)={len(ss.rankings_df)}")
     # st.write(metrics) #debug
     # st.stop() #debug
     return metrics
@@ -2261,7 +2261,7 @@ def transaction_show_modal():
 
 def display_stock_analysis_form(stock_growth_analysis_df):
 
-    print("entering into display_stock_analysis_form function")
+    print(f"entering into display_stock_analysis_form function, len(ss.rankings_df)={len(ss.rankings_df)}, len(ss.editable_stock_growth_analysis_d)={len(ss.editable_stock_growth_analysis_df)}")
 
     if ss.rerun_the_application==True:
         print('ss.rerun the application set, rerunning from top of display_stock_analysis_form')
@@ -2281,7 +2281,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers']
 
     # st.write("**Stock Growth Analysis Data:**")
-    if len(ss.editable_stock_growth_analysis_df) == 0 or ss.editable_stock_growth_analysis_df.empty or len(ss.rankings_df)==0 or ss.rankings_df.empty == 0:
+    if len(ss.editable_stock_growth_analysis_df) == 0 or len(ss.rankings_df)==0: #or ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty
+        print("display_stock_analysis_form: 1+ dataframes empty, reloading")
         ss.rankings_df = load_stock_growth_analysis_data_from_db()
         column_specs=get_column_specs_results_df()
         rename_map = {
@@ -2667,6 +2668,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 ss['transaction_modal']['cik']=cik
                 ss['transaction_modal']['company_and_ticker']=company_and_ticker
                 st.write('Rerunning application') #debug
+                print("on_change_handle: settng ss.rerun_the_application=True")
                 ss.rerun_the_application=True
                 # trasaction_modal(cik, company_and_ticker)
                 
@@ -2855,11 +2857,13 @@ def main():
 
     if admin_btn:
         ss.admin_buttons=True
+        print("ss.admin_btn st.rerun")
         st.rerun()
 
     # For the menu button click, change the session state form and rerun
     if return_menu_btn:
         reset_forms_ss_vars()
+        print("return_menu_btn st.rerun")
         st.rerun()
 
     if calc_new_score_btn:
@@ -2901,6 +2905,7 @@ def main():
         reset_forms_ss_vars()
         ss.investment_returns_form=True
         ss.hide_menu=True
+        print("investment_returns_btn st.rerun")
         st.rerun()
     
     if process_yahoo_and_stats_btn:
@@ -2956,6 +2961,7 @@ def main():
         ss.hide_menu=True
         ss.view_stock_analysis_form=True
         ss.process_yahoo_and_statistics=False
+        print("finished process_yahoo_and_statistics st.rerun")
         st.rerun()
 
     if ss.qtr_data_form:
