@@ -166,6 +166,13 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         # y=alt.Y(f"{var_name}:Q") #, axis=alt.Axis(grid=False)
     )
     
+    nearest = alt.selection_point(
+        fields=["x_label"],
+        nearest=True,
+        on="touchstart,pointerover", # pointerover, pointerdown, pointermove, mouseover, click
+        empty=False #'None'
+    )
+    
     touch_area = base.mark_point(
         size=800,          # large hit area
         opacity=0.001      # invisible
@@ -177,31 +184,13 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
             alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
         ]
-    )    
+    ).add_params(nearest)
 
     line = base.mark_line(color="#4C78A8").encode(
             # x="x_label:T",
             y=alt.Y(f"{var_name}:Q") #,axis=alt.Axis(grid=False)
         )
     
-    nearest = alt.selection_point(
-        fields=["x_label"],
-        nearest=True,
-        on="touchstart,pointerover", # pointerover, pointerdown, pointermove, mouseover, click
-        empty=False #'None'
-    )
-
-    selectors = base.mark_point().add_params(nearest).encode(
-            # x="x_label:T",
-            opacity=alt.value(0),
-            tooltip=[
-                alt.Tooltip("x_label:T", title="Date"),
-                alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
-                alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
-                alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
-            ]
-        )
-
     points = (base.mark_point(size=20).encode(
             x=alt.X('x_label:T',scale=alt.Scale(padding=10),axis=alt.Axis(grid=False)),
             y=f"{var_name}:Q",
@@ -215,13 +204,13 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         )
         .transform_filter(nearest)
     )
-    
+
     # points = points.add_params(nearest)
     rule = base.mark_rule(color="gray").encode(
             x=alt.X("x_label:T"),
             opacity=alt.condition(nearest, alt.value(0.3), alt.value(0))
         )
-    
+
     ma_line = base.mark_line(color="#FFA500", strokeDash=[4, 4]).encode(
         x=alt.X("x_label:T"),
         y="MA4:Q"
@@ -232,9 +221,20 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             x=alt.X("x_label:T"),
             y="Fitted:Q"
         )
+
+    # selectors = base.mark_point().add_params(nearest).encode(
+    #         # x="x_label:T",
+    #         opacity=alt.value(0),
+    #         tooltip=[
+    #             alt.Tooltip("x_label:T", title="Date"),
+    #             alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
+    #             alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
+    #             alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
+    #         ]
+    #     )
     
     chart = (
-        line + points + rule + ma_line + touch_area + selectors
+        line + points + rule + ma_line + touch_area #+ selectors
     ).properties(
         width=800,
         height=400,
@@ -2846,6 +2846,56 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# Global CSS for clipping container + tooltip behavior
+st.markdown("""
+<style>
+/* iPad overflow fix */
+.clipped-block {
+    position: relative;
+    overflow: hidden;
+}
+
+/* Tooltip styling */
+.tooltip-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip-wrapper:hover .tooltip-bubble {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.tooltip-bubble {
+    opacity: 0;
+    transition: opacity 0.15s ease-in-out;
+    position: absolute;
+    top: -5px;
+    left: 105%;
+    background: #333;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 9999;
+    font-size: 0.8rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# keep tooltip compact
+st.markdown("""
+<style>
+.vega-tooltip {
+    max-width: 200px !important;
+    font-size: 12px !important;
+    padding: 4px 6px !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 st.write('Created by Rafael Avila leveraging Streamlit and Postgres, using SEC Filings data provided by SEC Edgar platform and Stock data from Yahoo Finance.')
