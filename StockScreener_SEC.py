@@ -173,7 +173,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     nearest = alt.selection_point(
         fields=["x_label"],
         nearest=True,
-        on="pointerover", # pointerdown, pointermove, mouseover, click
+        on="touchstart", # pointerover, pointerdown, pointermove, mouseover, click
         empty='none' #False
     )
 
@@ -2708,6 +2708,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     # header_config = {'header': {'font-weight': 'bold', 'text-align': 'center'}}
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 # ,hide_index=True
+                ,height=500
                 ,column_config= {
                 'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
