@@ -25,6 +25,66 @@ logging.basicConfig(
 ss = st.session_state
 st.markdown("<script>setInterval(() => {window.parent.postMessage({isAlive: true}, '*')}, 15000);</script>", unsafe_allow_html=True)
 
+alt.renderers.set_embed_options(tooltip={"theme": "dark"})
+
+st.markdown("""
+<script>
+document.addEventListener('scroll', function() {
+    const el = document.getElementById('vg-tooltip-element');
+    if (el) {
+        el.style.opacity = 0;
+    }
+});
+</script>
+
+<style>
+/* Optional compact styling */
+.vega-tooltip {
+    max-width: 200px !important;
+    font-size: 12px !important;
+    padding: 4px 6px !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    pointer-events: none !important;
+    z-index: 9999 !important;
+    transition: opacity 0.1s ease-out;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+    <style>
+    #vg-tooltip-element {
+        z-index: 1000000 !important;
+        position: fixed !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+/* Force Vega tooltip to be fixed-position and ignore inline top/left */
+.vega-tooltip {
+    position: fixed !important;
+    transform: translate(0, 0) !important;
+    left: auto !important;
+    top: auto !important;
+    pointer-events: none !important;
+    z-index: 9999 !important;
+}
+
+/* Optional: keep tooltip compact */
+.vega-tooltip {
+    max-width: 200px !important;
+    font-size: 12px !important;
+    padding: 4px 6px !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 if "quarterly_financials" not in ss:
     ss.quarterly_financials = pd.DataFrame()
     ss.results_df = pd.DataFrame()
@@ -160,18 +220,33 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     plot_df["MA4"] = plot_df[var_name].rolling(window=4).mean()
     
     # st.write(plot_df) #debug
-    # base = alt.Chart(plot_df).encode(x=alt.X("x_label:T",title=None))
     base = alt.Chart(plot_df).encode(
         x=alt.X("x_label:T", title=None,axis=alt.Axis(grid=False, tickCount="year")) #, axis=alt.Axis(grid=False)
         # y=alt.Y(f"{var_name}:Q") #, axis=alt.Axis(grid=False)
     )
     
+    # --- Touch-friendly selection ---
     nearest = alt.selection_point(
         fields=["x_label"],
         nearest=True,
-        on="touchstart,pointerover", # pointerover, pointerdown, pointermove, mouseover, click
+        on="touchstart,mouseover", #pointerover
         empty=False #'None'
     )
+
+    # # --- Invisible hit area (ONLY tooltip source) ---
+    # tooltip_layer = base.mark_point(
+    #     size=800,
+    #     opacity=0.0001
+    # ).encode(
+    #     x="x_label:T",
+    #     y=f"{var_name}:Q",
+    #     tooltip=[
+    #         alt.Tooltip("x_label:T", title="Date"),
+    #         alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
+    #         alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
+    #         alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
+    #     ]
+    # ).add_params(nearest)
     
     touch_area = base.mark_point(
         size=800,          # large hit area
@@ -205,7 +280,6 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         .transform_filter(nearest)
     )
 
-    # points = points.add_params(nearest)
     rule = base.mark_rule(color="gray").encode(
             x=alt.X("x_label:T"),
             opacity=alt.condition(nearest, alt.value(0.3), alt.value(0))
@@ -216,7 +290,6 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         y="MA4:Q"
     )
     
-    # Add regression line
     reg_line = base.mark_line(color="red").encode(
             x=alt.X("x_label:T"),
             y="Fitted:Q"
@@ -234,19 +307,21 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     #     )
     
     chart = (
-        line + points + rule + ma_line + touch_area #+ selectors
+        line + points + rule + ma_line + reg_line + touch_area #+ selectors
     ).properties(
-        width=800,
-        height=400,
+        # width=800,
+        # height=400,
         title=alt.TitleParams(
             f"{var_name.replace('_', ' ')} Regression for {name}",
             anchor="middle"
         ),
         padding={"bottom": 0}
+    ).configure_view(
+        stroke=None # Cleans up the border which can interfere with offsets
     )
     
     # st.altair_chart(chart + reg_line, width='content')              
-    return chart + reg_line
+    return chart
 
 def perform_regression(name, var_name, values, end_date, plot_regression_bin, remove_outliers):
     
@@ -781,9 +856,9 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             
         if plot_regression_bin==1:
             try:
-                col1, col2, col3 = st.columns(3)
+                chart_col1, chart_col2, chart_col3 = st.columns(3)
                 if chart_revenue is not None:
-                    with col1:
+                    with chart_col1:
                         # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
                         # revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
                         placeholder=st.empty()
@@ -792,7 +867,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                         # st.write(f"metrics['revenue_growth_pct']={metrics['revenue_growth_pct']}, annualized={annualized_growth}")
                         centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['revenue_r2']:.2f}, Outlier: {metrics['revenue_outlier_pct']:.0f}%, n={metrics['revenue_n']}")
                 if chart_income is not None:
-                    with col2:
+                    with chart_col2:
                         # income_slope_pct = (metrics['income_growth_slope'] / metrics['income_growth_median'] * 100) if metrics['income_growth_median'] != 0 else 0
                         placeholder=st.empty()
                         placeholder.altair_chart(chart_income, width='stretch')
@@ -800,7 +875,8 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                         annualized_growth = ((1+(metrics['income_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['income_growth_pct'])
                         centered_text(f"Annual Growth (reg line): {annualized_growth:,.1f}%, R²: {metrics['income_r2']:.2f}, Outlier: {metrics['income_outlier_pct']:.0f}%, n={metrics['income_n']}")
                 if chart_margin is not None:
-                    with col3:
+                    with chart_col3:
+                        sub_col1, sub_col2 = st.columns([2,1])
                         # margin_slope_pct = (metrics['margin_growth_slope'] / metrics['margin_growth_median'] * 100) if metrics['margin_growth_median'] != 0 else 0
                         placeholder=st.empty()
                         placeholder.altair_chart(chart_margin, width='stretch')
@@ -2563,7 +2639,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
         'last_filing_date','last_earnings_date','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
     
-    col1, col2, col3, col4 = st.columns([0.5,1,1,0.25])
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.write()
         st.write(f"Current filters selecting {len(ss.editable_stock_growth_analysis_df[mask])} companies")
@@ -2571,10 +2647,11 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         st.write()
         column_include_regression = st.toggle("Include Regression Fields (may slow performance on large datasets)", value=False,key='column_include_regression')
     with col3:
-        sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
-    with col4:
-        st.write()
-        sort_direction = st.radio("Sort Direction?", options=["Asc","Desc"],index=1,key='temp_sort_direction', on_change=update_primary_filter_session_value, args=("sort_direction",))
+        sub_col1, sub_col2 = st.columns([3,1.2],gap="small")
+        with sub_col1:
+            sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
+        with sub_col2:
+            sort_direction = st.radio("Sort", options=["Asc","Desc"],index=1,key='temp_sort_direction', on_change=update_primary_filter_session_value, args=("sort_direction",), horizontal=True)
 
     extra_columns=['Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
@@ -2880,19 +2957,6 @@ st.markdown("""
     white-space: nowrap;
     z-index: 9999;
     font-size: 0.8rem;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# keep tooltip compact
-st.markdown("""
-<style>
-.vega-tooltip {
-    max-width: 200px !important;
-    font-size: 12px !important;
-    padding: 4px 6px !important;
-    white-space: normal !important;
-    word-break: break-word !important;
 }
 </style>
 """, unsafe_allow_html=True)
