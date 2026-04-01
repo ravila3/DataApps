@@ -773,31 +773,6 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
                         # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
                         # revenue_slope_pct = (metrics['revenue_growth_slope'] / metrics['revenue_growth_median'] * 100) if metrics['revenue_growth_median'] != 0 else 0
                         placeholder=st.empty()
-                        st.markdown("""
-                        <style>
-
-                        /* --- GLOBAL CHART SCALE FOR IPAD --- */
-                        @media (max-width: 1024px) {
-                            .vega-embed {
-                                zoom: 0.82; /* adjust 0.75–0.90 depending on taste */
-                                -webkit-transform: scale(0.82);
-                                -webkit-transform-origin: top left;
-                            }
-                        }
-
-                        /* --- COMPACT TOOLTIP --- */
-                        .vega-tooltip {
-                            font-size: 12px !important;
-                            padding: 4px 6px !important;
-                            max-width: 200px !important;
-                            white-space: normal !important;
-                            word-break: break-word !important;
-                            overflow-wrap: break-word !important;
-                        }
-
-                        </style>
-                        """, unsafe_allow_html=True)
-
                         placeholder.altair_chart(chart_revenue, width='stretch') #, width='stretch'
                         annualized_growth = ((1+(metrics['revenue_growth_pct'])/100) **4 - 1)* 100 #* np.sign(metrics['revenue_growth_pct'])
                         # st.write(f"metrics['revenue_growth_pct']={metrics['revenue_growth_pct']}, annualized={annualized_growth}")
@@ -2812,20 +2787,23 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     return
 
 # set page config and title
-st.set_page_config(page_title="Stock Screener", layout="wide")
-
 st.markdown("""
 <style>
 
-/* Scale down the entire Streamlit app on iPad/tablets */
+/* Works in iPad Web App (PWA) mode */
 @media (max-width: 1024px) {
-    html {
-        zoom: 0.80; /* try 0.80–0.90 */
+    .main {
+        -webkit-transform: scale(0.85);
+        transform: scale(0.85);
+        transform-origin: top left;
+        width: 118%; /* prevents right-side cutoff */
     }
 }
 
 </style>
 """, unsafe_allow_html=True)
+
+st.set_page_config(page_title="Stock Screener", layout="wide")
 
 st.markdown(
     """
