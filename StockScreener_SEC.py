@@ -166,16 +166,29 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         # y=alt.Y(f"{var_name}:Q") #, axis=alt.Axis(grid=False)
     )
     
+    touch_area = base.mark_point(
+        size=800,          # large hit area
+        opacity=0.001      # invisible
+    ).encode(
+        x="x_label:T",
+        tooltip=[
+            alt.Tooltip("x_label:T", title="Date"),
+            alt.Tooltip(f"{var_name}:Q", title=var_name.replace("_", " "), format=",.0f"),
+            alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
+            alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
+        ]
+    )    
+
     line = base.mark_line(color="#4C78A8").encode(
             # x="x_label:T",
             y=alt.Y(f"{var_name}:Q") #,axis=alt.Axis(grid=False)
         )
-
+    
     nearest = alt.selection_point(
         fields=["x_label"],
         nearest=True,
         on="touchstart,pointerover", # pointerover, pointerdown, pointermove, mouseover, click
-        empty='none' #False
+        empty=False #'None'
     )
 
     selectors = base.mark_point().add_params(nearest).encode(
@@ -221,7 +234,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         )
     
     chart = (
-        line + points + rule + ma_line + selectors
+        line + points + rule + ma_line + touch_area + selectors
     ).properties(
         width=800,
         height=400,
