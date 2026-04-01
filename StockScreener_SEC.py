@@ -2817,6 +2817,19 @@ st.set_page_config(page_title="Stock Screener", layout="wide")
 
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
+st.markdown("""
+<style>
+
+/* Scale down the entire Streamlit app on iPad/tablets */
+@media (max-width: 1024px) {
+    html {
+        zoom: 0.85; /* try 0.80–0.90 */
+    }
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown(
     """
     <style>
