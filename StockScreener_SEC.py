@@ -2693,6 +2693,17 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
+                    
+    st.markdown(
+        """
+        <style>
+        html, body { overscroll-behavior: none; touch-action: pan-y; }
+        /* target Streamlit editor container if needed */
+        .stDataFrame, .stDataEditor { -webkit-overflow-scrolling: touch; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     
     # header_config = {'header': {'font-weight': 'bold', 'text-align': 'center'}}
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
