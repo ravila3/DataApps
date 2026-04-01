@@ -2812,9 +2812,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     return
 
 # set page config and title
-st.set_page_config( page_title="Stock Screener", layout="wide" )
-st.set_page_config(page_title="Stock Screener", layout="wide")
-
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
 st.markdown("""
@@ -2823,7 +2820,7 @@ st.markdown("""
 /* Scale down the entire Streamlit app on iPad/tablets */
 @media (max-width: 1024px) {
     html {
-        zoom: 0.85; /* try 0.80–0.90 */
+        zoom: 0.80; /* try 0.80–0.90 */
     }
 }
 
