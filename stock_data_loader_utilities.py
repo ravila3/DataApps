@@ -23,6 +23,7 @@ from psycopg2 import sql, OperationalError, errors
 from psycopg2.extras import execute_values
 
 ss = st.session_state
+st.markdown("<script>setInterval(() => {window.parent.postMessage({isAlive: true}, '*')}, 15000);</script>", unsafe_allow_html=True)
 
 # from sec_api import MappingApi
 # List of CIKs
@@ -127,7 +128,7 @@ def get_tickers_sec(ciks, delay=0.2):
         time.sleep(delay)
     return tickers
 
-@st.cache_resource(ttl='2h') # 43200 is 12 hrs in seconds 
+@st.cache_resource(ttl='1h') # 43200 is 12 hrs in seconds 
 def yahoo_finance_load(ticker):
     print("entering into yahoo_finance_load function")
     

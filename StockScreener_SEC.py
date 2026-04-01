@@ -1327,7 +1327,7 @@ def rank_companies_by_growth_and_update_DB(cik_list):
             last_filing_ts = pd.to_datetime(last_filing_date, utc=True, errors='coerce')
             last_reg_ts = pd.to_datetime(last_regression_update_datetime, utc=True, errors='coerce')
             if pd.notna(last_reg_ts):
-                last_reg_ts = last_reg_ts.floor('s') - pd.Timedelta(hours=24)
+                last_reg_ts = last_reg_ts.floor('s') #- pd.Timedelta(hours=24)
             last_sec_ts = pd.to_datetime(last_sec_update_datetime, utc=True, errors='coerce')
             if pd.notna(last_sec_ts):
                 last_sec_ts = last_sec_ts.floor('s')
@@ -2132,7 +2132,7 @@ def show_investment_returns():
     # Sort: TOTAL first, then by purchase_amount descending
     investment_returns_df = (
         investment_returns_df
-            .sort_values(["sort_key", "purchase_amount"], ascending=[True, False])
+            .sort_values(["sort_key", "current_holdings_value"], ascending=[True, False])
             .reset_index(drop=True)
     )
 
