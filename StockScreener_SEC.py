@@ -2563,13 +2563,13 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
         'last_filing_date','last_earnings_date','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns([0.5,1,1,0.25])
     with col1:
         st.write()
         st.write(f"Current filters selecting {len(ss.editable_stock_growth_analysis_df[mask])} companies")
     with col2:
         st.write()
-        column_include_regression = st.checkbox("Include Regression Fields (may slow performance on large datasets)", value=False,key='column_include_regression')
+        column_include_regression = st.toggle("Include Regression Fields (may slow performance on large datasets)", value=False,key='column_include_regression')
     with col3:
         sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
     with col4:
