@@ -23,6 +23,7 @@ logging.basicConfig(
 )
 
 ss = st.session_state
+st.markdown("<script>setInterval(() => {window.parent.postMessage({isAlive: true}, '*')}, 15000);</script>", unsafe_allow_html=True)
 
 if "quarterly_financials" not in ss:
     ss.quarterly_financials = pd.DataFrame()

@@ -23,7 +23,6 @@ from psycopg2 import sql, OperationalError, errors
 from psycopg2.extras import execute_values
 
 ss = st.session_state
-st.markdown("<script>setInterval(() => {window.parent.postMessage({isAlive: true}, '*')}, 15000);</script>", unsafe_allow_html=True)
 
 # from sec_api import MappingApi
 # List of CIKs
