@@ -29,27 +29,13 @@ alt.renderers.set_embed_options(tooltip={"theme": "dark"})
 
 st.markdown("""
 <script>
-document.addEventListener('scroll', function() {
-    const el = document.getElementById('vg-tooltip-element');
+window.parent.addEventListener('scroll', function() {
+    const el = window.parent.document.getElementById('vg-tooltip-element');
     if (el) {
         el.style.opacity = 0;
     }
 });
 </script>
-
-<style>
-/* Optional compact styling */
-.vega-tooltip {
-    max-width: 200px !important;
-    font-size: 12px !important;
-    padding: 4px 6px !important;
-    white-space: normal !important;
-    word-break: break-word !important;
-    pointer-events: none !important;
-    z-index: 9999 !important;
-    transition: opacity 0.1s ease-out;
-}
-</style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
@@ -2799,7 +2785,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     # header_config = {'header': {'font-weight': 'bold', 'text-align': 'center'}}
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 # ,hide_index=True
-                ,height=450
+                # ,height=450
                 ,column_config= {
                 'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
                 'chart':st.column_config.CheckboxColumn(label='Charts', width="small", pinned=True),
@@ -2968,7 +2954,7 @@ def main():
     print("starting main function")
 
 # features to build:
-# stock charts & some specific timeframes (a day ago, week ago, month ago, 6m ago, 1yr ago, 5yr ago)
+# add dividend yield to yahoo data
 # provide info on insider transactions
 # provide info on analyst estimate revisions
 # enable multiple users
@@ -2981,6 +2967,7 @@ def main():
 # enable charts with/without outliers - completed 3/11/26
 # update bought/sold shares and provide summary of rate of return - completed 3/16/26
 # look for new SEC filings, perform incremental updates  - completed 3/16/26
+# added % chg vs 7 days ago - completed 3/16/26
 
     calc_new_score_btn = load_full_sec_btn = load_incremental_sec_btn = admin_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = False
 
