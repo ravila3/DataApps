@@ -115,6 +115,7 @@ if "quarterly_financials" not in ss:
     ss.compute_value_score=False
     ss.apply_scores_requested=False
     ss.apply_scores_done=False
+    ss.compute_value_show_df = False
 
 if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
@@ -903,7 +904,8 @@ def missing_penalty_vec(missing_frac, N, *, alpha=3.5, k=1.8, N0=3.0, max_penalt
 
 
 def compute_value_score_on_df(show_df=False):
-    
+    if(show_df):
+        ss.compute_value_show_df = True
     print('starting compute_value_score_on_df')
     with st.spinner("Calculating Value Scores"):
         ss.rankings_df = load_stock_growth_analysis_data_from_db()
@@ -1053,7 +1055,7 @@ def compute_value_score_on_df(show_df=False):
         cols_to_update = ['cik', 'consolidated_score','growth_quality', 'recent_momentum', 'stability_trend', 'value_pressure']
         cols_to_update = [c for c in cols_to_update if c in df.columns]
     
-    if show_df==True:
+    if show_df==True or ss.compute_value_show_df==True:
         # these are for optimizing algorithm for score
         df['consolidated_score_d']= np.where(mask_score, score_raw.round(1), -100.0) #debug
         df['growth_quality_d']= GQ_raw.round(1) #debug
@@ -1108,11 +1110,14 @@ def compute_value_score_on_df(show_df=False):
             ss.apply_scores_requested = True
             ss.apply_scores_done = False   # reset done if re-requesting
 
+        print(f"ss.compute_value_score: {ss.compute_value_score}, ss.compute_value_show_df: {ss.compute_value_show_df}, apply_scores_requested: {ss.apply_scores_requested}, apply_scores_done: {ss.apply_scores_done}") #debug
+
         # --- perform the DB update exactly once per request ---
         if ss.apply_scores_requested and not ss.apply_scores_done:
             with st.spinner("Applying changes to DB..."):
                 try:
                     # perform the DB write
+                    print('applying scores to DB')
                     postgres_update_bulk(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])
                     st.toast("Scores saved to DB")
                     ss.apply_scores_done=True
@@ -1124,16 +1129,10 @@ def compute_value_score_on_df(show_df=False):
             st.success("Saved to DB and updated rankings.")
             ss.apply_scores_requested = ss.apply_scores_done = False
             # ss.rankings_df = ss.rankings_df.iloc[0,0]
+            ss.compute_value_show_df = False
             st.rerun()
             # optionally clear the request flag if you want one-shot behavior:
             # ss.apply_scores_requested'] = False
-
-        # # show status and allow re-run
-        # if ss.apply_scores_done:
-        #     st.info("Last apply completed successfully.")
-        #     if st.button("Allow another apply"):
-        #         ss.apply_scores_requested = False
-        #         ss.apply_scores_done = False
     else:
     # if view dataframe was not set to True, update DB and assign to ss.rankings.df
         postgres_update_bulk(df[cols_to_update], 'stock_growth_analysis_results', ['cik'])  # Save results to PostgreSQL
@@ -3018,6 +3017,9 @@ def main():
         st.rerun()
 
     if calc_new_score_btn:
+        ss.compute_value_score = True
+
+    if ss.compute_value_score==True and ss.view_stock_analysis_form==False:
         compute_value_score_on_df(show_df=True)
 
     if view_stock_analysis_form_btn:
