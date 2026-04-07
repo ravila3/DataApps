@@ -912,14 +912,25 @@ def compute_value_score_on_df(show_df=False):
         df = ss.rankings_df.copy()
 
         # Helper: coerce numeric columns (non-numeric -> NaN)
-        def to_num(col):
-            return pd.to_numeric(df[col], errors="coerce")
+        # def to_num(col):
+        #     return pd.to_numeric(df[col], errors="coerce")
+        
+        def to_num(col, fallback=0.0, clip=None):
+            s = pd.to_numeric(df[col], errors="coerce").fillna(fallback)
+
+            if clip is not None:
+                lo, hi = clip
+                s = s.clip(lo, hi)
+            return s
+
 
         # --- Growth Quality (GQ) --------------------------------------------------------------------------------
  
         capped_rev_growth_PCT = to_num('revenue_growth_pct').clip(upper=100,lower=-100)
         capped_inc_growth_PCT = np.minimum(to_num('income_growth_pct'), 2 * capped_rev_growth_PCT)
-        capped_margin_growth_slope = to_num('margin_growth_slope').clip(upper=10)
+        capped_margin_growth_slope = to_num('margin_growth_slope').clip(upper=10, lower=-10)
+        # st.write(f"capped_margin_growth_slope: {capped_margin_growth_slope.describe()}") #debug
+        # st.stop()
 
         ratio = df['last6q_income_median'] / df['last6q_revenue_median']
         ratio = ratio.replace([np.inf, -np.inf], np.nan)
