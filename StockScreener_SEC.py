@@ -311,7 +311,6 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     return chart
 
 def perform_regression(name, var_name, values, end_date, plot_regression_bin, remove_outliers):
-    
     # 1. Sanitize input
     # st.write(values) #debug
 
@@ -319,7 +318,8 @@ def perform_regression(name, var_name, values, end_date, plot_regression_bin, re
     if y is None:
         return None  # nothing to regress on
     
-    # st.write(f"values: {len(values)}, y: {len(y)}")
+    # st.write("end_date:",end_date,"values: ",values,"y: ",y) #debug
+    # st.stop()
     end_date = np.array(end_date)
     
     # st.write(len(y),len(end_date)) #debug
@@ -435,6 +435,8 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         
         # Create a working dataframe with fiscal_timeframe
         quarterly_df_wc = quarterly_df.reset_index(drop=True).copy()
+        # st.write(quarterly_df_wc) #debug
+        # st.stop()
         quarterly_df_wc['fiscal_timeframe'] = quarterly_df_wc['fiscal_timeframe'].astype(str)
         quarterly_df_wc = quarterly_df_wc.sort_values(by='fiscal_timeframe', ascending=True).reset_index(drop=True)
         
@@ -453,6 +455,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         quarterly_df_wc = quarterly_df_wc[quarterly_df_wc['year_quarter'].notna()]  # Remove rows with invalid fiscal_timeframe
         
         # st.write(quarterly_df_wc) #debug
+        # st.stop()
         
         if len(quarterly_df_wc) < 8:
             return quarterly_df, None
@@ -902,7 +905,6 @@ def missing_penalty_vec(missing_frac, N, *, alpha=3.5, k=1.8, N0=3.0, max_penalt
     penalty = np.clip(penalty, 0.0, max_penalty)
     return penalty
 
-
 def compute_value_score_on_df(show_df=False):
     if(show_df):
         ss.compute_value_show_df = True
@@ -1127,9 +1129,8 @@ def compute_value_score_on_df(show_df=False):
         if ss.apply_scores_done:
             # only assign after successful write
             st.success("Saved to DB and updated rankings.")
-            ss.apply_scores_requested = ss.apply_scores_done = False
+            ss.compute_value_score = ss.compute_value_show_df = ss.apply_scores_requested = ss.apply_scores_done = False
             # ss.rankings_df = ss.rankings_df.iloc[0,0]
-            ss.compute_value_show_df = False
             st.rerun()
             # optionally clear the request flag if you want one-shot behavior:
             # ss.apply_scores_requested'] = False
@@ -1686,7 +1687,7 @@ def write_sec_data_into_db(load_type):
         st.write(f'new_ciks based on Yahoo earnings timestamp = {new_ciks}') #debug
         # st.stop()
 
-        # cik_list=['0001341439'] #debug
+        cik_list=['0001368514'] #debug
         print('Got list of cik to update for incremental load')
     
     # Now that you have cik_list, go get the data
@@ -1745,10 +1746,11 @@ def write_sec_data_into_db(load_type):
                 for pretty, spec in column_specs.items()
             })
             
-            primary_key_columns=['cik','fiscal_timeframe']
+            primary_key_columns=['cik','end_date']
             agg = {c: 'last' for c in df_pg.columns if c not in primary_key_columns}
             df_pg = df_pg.groupby(primary_key_columns, as_index=False).agg(agg)
             # st.write(df_pg) #debug
+            postgres_delete_all_for_cik(cik, 'stock_quarterly_financials_sec') # delete existing records for this cik to avoid duplicates (since we are doing an upsert with groupby last, this will ensure we only keep the latest record for each cik/end_date)
             postgres_update_bulk(df_pg, 'stock_quarterly_financials_sec', primary_key_columns=primary_key_columns)  # Save quarterly data with metrics to PostgreSQL
         except Exception as e:
             error=error+1
@@ -1846,6 +1848,32 @@ def postgres_delete_single_transaction(row):
     ))
 
     conn.commit()
+    cursor.close()
+    conn.close()
+
+def postgres_delete_all_for_cik(cik, table_name):
+    import psycopg2
+    import pandas as pd
+
+    connection_params = {
+        "user": st.secrets["postgres_financial_data"]["user"],
+        "host": st.secrets["postgres_financial_data"]["host"],
+        "port": st.secrets["postgres_financial_data"]["port"],
+        "database": st.secrets["postgres_financial_data"]["database"],
+        "password": st.secrets["postgres_financial_data"]["password"]
+    }
+
+    conn = psycopg2.connect(**connection_params)
+    cursor = conn.cursor()
+
+    delete_sql = f"""
+        DELETE FROM {table_name}
+        WHERE cik = %s;
+    """
+
+    cursor.execute(delete_sql, (cik,))
+    conn.commit()
+
     cursor.close()
     conn.close()
 

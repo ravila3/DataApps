@@ -622,7 +622,7 @@ def sec_edgar_financial_load(cik):
                     end_date_totals["corrected_frame"] = generate_corrected_frames(end_date_totals, base_year)
                     
                     if debug_flag==1:
-                        st.write('end_date_totals',end_date_totals) #debug
+                        st.write('end_date_totals after corrected_frame',end_date_totals) #debug
                     
                     end_date_metric_totals = (
                         metrics_df
@@ -637,13 +637,12 @@ def sec_edgar_financial_load(cik):
                         )
                         .reset_index()
                         .sort_values(["metric", "end"])
-                    )                
+                    )
 
                     metric_end_with_frames = (
                         end_date_metric_totals
                         .loc[end_date_metric_totals["distinct_frames"] > 0, ["metric", "end"]]
-                    )
-                    
+                    )                    
                     metric_end_with_frames_index = pd.MultiIndex.from_frame(metric_end_with_frames)
 
                     # Build a MultiIndex for the main DF
@@ -671,6 +670,8 @@ def sec_edgar_financial_load(cik):
                         end_date_metric_totals
                         .loc[end_date_metric_totals["distinct_frames"] == 0, ["metric", "end"]]
                     )
+
+
                     metric_end_no_frames_index = pd.MultiIndex.from_frame(metric_end_no_frames)
 
                     # Build row-level MultiIndex
@@ -685,8 +686,15 @@ def sec_edgar_financial_load(cik):
 
                     # Final filter
                     drop_mask = is_income & is_no_frame_end & is_wrong_start
-                    metrics_df = metrics_df[~drop_mask]                 
+                    drop_mask += is_no_frame_end
+                    metrics_df = metrics_df[~drop_mask]
                     
+                    if debug_flag==1:
+                        st.write('end_date_metric_totals', end_date_metric_totals) #debug
+                        st.write('metric_end_with_frames',metric_end_with_frames) #debug
+                        st.write('metric_end_no_frames', metric_end_no_frames) #debug
+                        st.write('metrics_df after mask', metrics_df) #debug
+                        
                     metrics_df = metrics_df.drop_duplicates(subset=["start", "end","metric_label"])
                                     
                     # restate the frame in temp_df
@@ -699,11 +707,11 @@ def sec_edgar_financial_load(cik):
                     metrics_df = metrics_df.rename(columns={"frame": "frame_from_SEC"})
                     
                     metrics_df["frame"] = metrics_df["end"].map(end_to_corrected)
-                    metrics_df = metrics_df[metrics_df['frame'].notna()]    
+                    metrics_df = metrics_df[metrics_df['frame'].notna()]
                     # st.write('metrics_df after cleanup', metrics_df) #debug
-                                
-                if debug_flag==1:
-                    st.write('Initial SEC EDGAR dataframe',metrics_df) #debug
+
+                    if debug_flag==1:
+                        st.write('Initial SEC EDGAR dataframe',metrics_df) #debug
 
                 metrics_df['cik']=cik
                 metrics_df.rename(columns={'val':'value'},inplace=True)
@@ -726,6 +734,8 @@ def sec_edgar_financial_load(cik):
                     # metrics_df['frame_quarter'] = metrics_df['frame'].apply(extract_quarter)
 
                 quarter_counts = metrics_df[metrics_df['category'] == 'Income Statement']['frame_quarter'].value_counts()
+                if debug_flag==1:
+                    st.write('quarter_counts for Income Statement metrics', quarter_counts) #debug
 
                 # Create a dictionary with all quarters and initialize counts to zero
                 all_quarters_counts = {str(q): 0 for q in range(1, 5)}
@@ -944,6 +954,8 @@ def sec_edgar_financial_load(cik):
     
     pivoted_qtr_df['end_date']=pd.to_datetime(pivoted_qtr_df["end_date"], errors="coerce")
     # pivoted_qtr_df['start_date']=pd.to_datetime(pivoted_qtr_df["start_date"], errors="coerce")
+    
+    # st.write('pivoted_qtr_df after changing end_date to datetime:', pivoted_qtr_df) #debug
     
     pivoted_annual_df['end_date']=pd.to_datetime(pivoted_annual_df["end_date"], errors="coerce")
     # pivoted_annual_df['start_date']=pd.to_datetime(pivoted_annual_df["start_date"], errors="coerce")
