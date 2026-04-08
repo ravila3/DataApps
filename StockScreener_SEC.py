@@ -1145,141 +1145,142 @@ def compute_value_score_on_df(show_df=False):
     print('exiting compute_value_score_on_df')
     return
 
-#Note that ss.quarterly_financials must be loaded for this to function
-def collect_data_for_company(cik):
-    print("entering into collect_data_for_company function")
+# #Note that ss.quarterly_financials must be loaded for this to function
+# def collect_data_for_company(cik):
+#     print("entering into collect_data_for_company function")
 
-    try:
-        ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
-        last_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'last_filing_date'].max()
-        max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
-        company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
-        quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
+#     try:
+#         ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
+#         last_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'last_filing_date'].max()
+#         max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
+#         company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
+#         quarterly_df_wc = ss.quarterly_financials[ss.quarterly_financials['cik'] == cik].reset_index(drop=True).copy()
         
-        # only run metrics if there is a new filing in the quarterly dataframe: if(quarterly_df_wc[last_modified_date]>)
-        # likely will have to run the value score on the dataframe instead of each cik. Then we can just update Yahoo and recaulculate value score using the last regression calc
-        metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
-        # st.write('metrics:',metrics) #debug 
+#         # only run metrics if there is a new filing in the quarterly dataframe: if(quarterly_df_wc[last_modified_date]>)
+#         # likely will have to run the value score on the dataframe instead of each cik. Then we can just update Yahoo and recaulculate value score using the last regression calc
+#         metrics = analyze_yoy_growth(quarterly_df_wc, company_and_ticker,plot_regression_bin=0)
+#         # st.write('metrics:',metrics) #debug 
 
-        yahoo_stats = yahoo_finance_load(ticker)
-        industry = yahoo_stats.get('industry')
-        sector = yahoo_stats.get('sector')
-        company_desc = yahoo_stats.get('longBusinessSummary')
-        stock_price = safe_round(yahoo_stats.get("currentPrice"),2)
-        price_range_52wks = yahoo_stats.get("fiftyTwoWeekRange")
-        pct_chg_from_52wk_high = yahoo_stats.get("fiftyTwoWeekHighChangePercent")
-        pct_chg_from_52wk_low = yahoo_stats.get("fiftyTwoWeekLowChangePercent")
-        trailing_pe = clean_number(yahoo_stats.get("trailingPE"))
-        trailing_ps = clean_number(yahoo_stats.get("priceToSalesTrailing12Months"))
-        forward_pe = clean_number(yahoo_stats.get("forwardPE"))
-        # last_earnings_date = yahoo_stats.get("earningsTimestamp").floor('D').to_date()
-        last_earnings_datetime = yahoo_stats.get("earningsTimestamp")
-        last_earnings_date = (pd.to_datetime(int(last_earnings_datetime), unit=("ms" if int(last_earnings_datetime) > 1_000_000_000_000 else "s"), utc=True).tz_convert("America/Los_Angeles").date() if last_earnings_datetime is not None else None)
-        next_earnings_datetime = yahoo_stats.get("earningsTimestampStart")
-        next_earnings_date = (pd.to_datetime(int(next_earnings_datetime), unit=("ms" if int(next_earnings_datetime) > 1_000_000_000_000 else "s"), utc=True).tz_convert("America/Los_Angeles").date() if next_earnings_datetime is not None else None)
-        # if next_earnings_datetime:
-        #     next_earnings_date = pd.to_datetime(next_earnings_datetime, unit="s", utc=True).tz_convert("America/Los_Angeles").date()
-        price_1w_ago = clean_number(safe_round(yahoo_stats.get("price_1w_ago"),2))
-        pct_chg_from_1w_ago = safe_round(safe_divide(stock_price,price_1w_ago)*100-100,1)
-        # st.write(f"pct_chg_from_1w_ago={pct_chg_from_1w_ago}, price_1w_ago={price_1w_ago}") #debug
-        # price_1m_ago = yahoo_stats.get("price_1m_ago")
-        # price_6m_ago = yahoo_stats.get("price_6m_ago")
-        # price_1y_ago = yahoo_stats.get("price_1y_ago")
-        stock_price_update_datetime=pd.Timestamp.now(tz="UTC").floor('min')
+#         yahoo_stats = yahoo_finance_load(ticker)
+#         industry = yahoo_stats.get('industry')
+#         sector = yahoo_stats.get('sector')
+#         company_desc = yahoo_stats.get('longBusinessSummary')
+#         stock_price = safe_round(yahoo_stats.get("currentPrice"),2)
+#         price_range_52wks = yahoo_stats.get("fiftyTwoWeekRange")
+#         pct_chg_from_52wk_high = yahoo_stats.get("fiftyTwoWeekHighChangePercent")
+#         pct_chg_from_52wk_low = yahoo_stats.get("fiftyTwoWeekLowChangePercent")
+#         trailing_pe = clean_number(yahoo_stats.get("trailingPE"))
+#         trailing_ps = clean_number(yahoo_stats.get("priceToSalesTrailing12Months"))
+#         forward_pe = clean_number(yahoo_stats.get("forwardPE"))
+#         # last_earnings_date = yahoo_stats.get("earningsTimestamp").floor('D').to_date()
+#         last_earnings_datetime = yahoo_stats.get("earningsTimestamp")
+#         last_earnings_date = (pd.to_datetime(int(last_earnings_datetime), unit=("ms" if int(last_earnings_datetime) > 1_000_000_000_000 else "s"), utc=True).tz_convert("America/Los_Angeles").date() if last_earnings_datetime is not None else None)
+#         next_earnings_datetime = yahoo_stats.get("earningsTimestampStart")
+#         next_earnings_date = (pd.to_datetime(int(next_earnings_datetime), unit=("ms" if int(next_earnings_datetime) > 1_000_000_000_000 else "s"), utc=True).tz_convert("America/Los_Angeles").date() if next_earnings_datetime is not None else None)
+#         # if next_earnings_datetime:
+#         #     next_earnings_date = pd.to_datetime(next_earnings_datetime, unit="s", utc=True).tz_convert("America/Los_Angeles").date()
+#         price_1w_ago = clean_number(safe_round(yahoo_stats.get("price_1w_ago"),2))
+#         pct_chg_from_1w_ago = safe_round(safe_divide(stock_price,price_1w_ago)*100-100,1)
+#         # st.write(f"pct_chg_from_1w_ago={pct_chg_from_1w_ago}, price_1w_ago={price_1w_ago}") #debug
+#         # price_1m_ago = yahoo_stats.get("price_1m_ago")
+#         # price_6m_ago = yahoo_stats.get("price_6m_ago")
+#         # price_1y_ago = yahoo_stats.get("price_1y_ago")
+#         stock_price_update_datetime=pd.Timestamp.now(tz="UTC").floor('min')
 
-        # st.write(company_and_ticker, trailing_pe,forward_pe,trailing_ps,last_earnings_date,price_1wk_ago,price_1mo_ago) #debug
-        # st.json(yahoo_stats) #debug
-        # st.stop()
+#         # st.write(company_and_ticker, trailing_pe,forward_pe,trailing_ps,last_earnings_date,price_1wk_ago,price_1mo_ago) #debug
+#         # st.json(yahoo_stats) #debug
+#         # st.stop()
 
-        # result = compute_value_score(company_and_ticker, metrics, trailing_pe,forward_pe,trailing_ps)
-        # value_score, growth_quality, recent_momentum, stability_trend, value_pressure = result
+#         # result = compute_value_score(company_and_ticker, metrics, trailing_pe,forward_pe,trailing_ps)
+#         # value_score, growth_quality, recent_momentum, stability_trend, value_pressure = result
         
-        # st.write(result) #debug
+#         # st.write(result) #debug
 
-        results=({
-        'cik': cik,
-        'ticker': ticker,
-        'company_and_ticker': company_and_ticker,
-        'industry': industry,
-        'sector': sector,
-        'stock_price' : stock_price,
-        'price_range_52wks' : price_range_52wks,
-        'pct_chg_from_52wk_high' : safe_multiply(safe_round(pct_chg_from_52wk_high,3),100),
-        'pct_chg_from_52wk_low' : safe_multiply(safe_round(pct_chg_from_52wk_low,3),100),
-        'trailing_pe' : safe_round(trailing_pe,1),
-        'forward_pe' : safe_round(forward_pe,1),
-        'trailing_ps' : safe_round(trailing_ps,1),
-        # 'Consolidated_Score': value_score,
-        # 'Growth_Quality': growth_quality,
-        # 'Recent_Momentum': recent_momentum,
-        # 'Stability_Trend': stability_trend,
-        # 'Value_Pressure': value_pressure,
-        'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
-        'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
-        'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
-        'Median_Income_Growth_PCT': safe_round(metrics['median_income_growth'], 2),
-        'Median_Margin_Growth_PCT': safe_round(metrics['median_margin_growth'], 2),
-        'Median_Margin_PCT': safe_round(metrics['margin_median'], 2),
-        'Last3Q_Revenue_Growth_PCT': safe_round(metrics['last_3q_revenue_growth'], 2),
-        'Last3Q_Income_Growth_PCT': safe_round(metrics['last_3q_income_growth'], 2),
-        'Last3Q_Margin_Growth_PCT': safe_round(metrics['last_3q_margin_growth'], 2),
-        'Last3Q_Median_Margin_PCT': safe_round(metrics['last_3q_median_margin'], 2),
-        'Last3Q_Income_Positive': int(metrics['last_3q_income_positive_count']),
-        'Last6Q_Revenue_Median': int(metrics['last_6q_revenue_median']),
-        'Last6Q_Income_Median': int(metrics['last_6q_income_median']),
-        'Revenue_Growth_Count': len(metrics['revenue_growth']),
-        'Income_Growth_Count': len(metrics['income_growth']),
-        'Margin_Growth_Count': len(metrics['margin_growth']),
-        'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
-        'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
-        'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_pct'],2),
-        'Revenue_Growth_N': metrics['revenue_n'],
-        'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
-        'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_outlier_pct'],2),
-        'Revenue_R2': safe_round(metrics['revenue_r2'], 4),
-        'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
-        'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
-        'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
-        'Income_Growth_PCT': safe_round(metrics['income_growth_pct'],2),
-        'Income_Growth_N': metrics['income_n'],
-        'Income_Growth_N_Outliers': metrics['income_n_outliers'],
-        'Income_Growth_Outlier_PCT': safe_round(metrics['income_outlier_pct'],2),
-        'Income_R2': safe_round(metrics['income_r2'], 4),
-        'Income_Avg_Residual_Last3': safe_round(metrics['income_avg_residual_last3']/1000, 2),
-        'Margin_Growth_Slope': safe_round(metrics['margin_growth_slope'], 4),
-        'Margin_Growth_Median': safe_round(metrics['margin_growth_median'], 2),
-        'Margin_Growth_N': metrics['margin_n'],
-        'Margin_Growth_N_Outliers': metrics['margin_n_outliers'],
-        'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
-        'Margin_R2': safe_round(metrics['margin_r2'], 4),
-        'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
-        'last_filing_date': last_filing_date,
-        'max_report_date': max_report_date,
-        'last_earnings_date': last_earnings_date,
-        'next_earnings_date': next_earnings_date,
-        'stock_price_update_datetime': stock_price_update_datetime,
-        'price_1w_ago': price_1w_ago,
-        'pct_chg_from_1w_ago': pct_chg_from_1w_ago,
-        'regression_update_datetime': metrics['regression_update_datetime'].floor('s'),
-        # 'price_1m_ago': price_1m_ago,
-        # 'price_6m_ago': price_6m_ago,
-        # 'price_1y_ago': price_1y_ago,
-        'company_desc': company_desc
-        })
-        # st.write(results) #debug 
+#         results=({
+#         'cik': cik,
+#         'ticker': ticker,
+#         'company_and_ticker': company_and_ticker,
+#         'industry': industry,
+#         'sector': sector,
+#         'stock_price' : stock_price,
+#         'price_range_52wks' : price_range_52wks,
+#         'pct_chg_from_52wk_high' : safe_multiply(safe_round(pct_chg_from_52wk_high,3),100),
+#         'pct_chg_from_52wk_low' : safe_multiply(safe_round(pct_chg_from_52wk_low,3),100),
+#         'trailing_pe' : safe_round(trailing_pe,1),
+#         'forward_pe' : safe_round(forward_pe,1),
+#         'trailing_ps' : safe_round(trailing_ps,1),
+#         'div_yield' : safe_round(div_yield,1),
+#         # 'Consolidated_Score': value_score,
+#         # 'Growth_Quality': growth_quality,
+#         # 'Recent_Momentum': recent_momentum,
+#         # 'Stability_Trend': stability_trend,
+#         # 'Value_Pressure': value_pressure,
+#         'Revenue_Consistency_Score': safe_round(metrics['revenue_consistency_score'], 1),
+#         'Income_Consistency_Score': safe_round(metrics['income_consistency_score'], 1),
+#         'Median_Revenue_Growth_PCT': safe_round(metrics['median_revenue_growth'], 2),
+#         'Median_Income_Growth_PCT': safe_round(metrics['median_income_growth'], 2),
+#         'Median_Margin_Growth_PCT': safe_round(metrics['median_margin_growth'], 2),
+#         'Median_Margin_PCT': safe_round(metrics['margin_median'], 2),
+#         'Last3Q_Revenue_Growth_PCT': safe_round(metrics['last_3q_revenue_growth'], 2),
+#         'Last3Q_Income_Growth_PCT': safe_round(metrics['last_3q_income_growth'], 2),
+#         'Last3Q_Margin_Growth_PCT': safe_round(metrics['last_3q_margin_growth'], 2),
+#         'Last3Q_Median_Margin_PCT': safe_round(metrics['last_3q_median_margin'], 2),
+#         'Last3Q_Income_Positive': int(metrics['last_3q_income_positive_count']),
+#         'Last6Q_Revenue_Median': int(metrics['last_6q_revenue_median']),
+#         'Last6Q_Income_Median': int(metrics['last_6q_income_median']),
+#         'Revenue_Growth_Count': len(metrics['revenue_growth']),
+#         'Income_Growth_Count': len(metrics['income_growth']),
+#         'Margin_Growth_Count': len(metrics['margin_growth']),
+#         'Revenue_Growth_Slope': safe_round(metrics['revenue_growth_slope'] / 1000, 2),
+#         'Revenue_Growth_Median': safe_round(metrics['revenue_growth_median'] / 1000, 2),
+#         'Revenue_Growth_PCT': safe_round(metrics['revenue_growth_pct'],2),
+#         'Revenue_Growth_N': metrics['revenue_n'],
+#         'Revenue_Growth_N_Outliers': metrics['revenue_n_outliers'],
+#         'Revenue_Growth_Outlier_PCT': safe_round(metrics['revenue_outlier_pct'],2),
+#         'Revenue_R2': safe_round(metrics['revenue_r2'], 4),
+#         'Revenue_Avg_Residual_Last3': safe_round(metrics['revenue_avg_residual_last3']/1000, 2),
+#         'Income_Growth_Slope': safe_round(metrics['income_growth_slope'] / 1000, 2),
+#         'Income_Growth_Median': safe_round(metrics['income_growth_median'] / 1000, 2),
+#         'Income_Growth_PCT': safe_round(metrics['income_growth_pct'],2),
+#         'Income_Growth_N': metrics['income_n'],
+#         'Income_Growth_N_Outliers': metrics['income_n_outliers'],
+#         'Income_Growth_Outlier_PCT': safe_round(metrics['income_outlier_pct'],2),
+#         'Income_R2': safe_round(metrics['income_r2'], 4),
+#         'Income_Avg_Residual_Last3': safe_round(metrics['income_avg_residual_last3']/1000, 2),
+#         'Margin_Growth_Slope': safe_round(metrics['margin_growth_slope'], 4),
+#         'Margin_Growth_Median': safe_round(metrics['margin_growth_median'], 2),
+#         'Margin_Growth_N': metrics['margin_n'],
+#         'Margin_Growth_N_Outliers': metrics['margin_n_outliers'],
+#         'Margin_Growth_Outlier_PCT': safe_round(metrics['margin_n_outliers'] / metrics['margin_n'] * 100, 2) if metrics['margin_n'] > 0 else 0,
+#         'Margin_R2': safe_round(metrics['margin_r2'], 4),
+#         'Margin_Avg_Residual_Last3': safe_round(metrics['margin_avg_residual_last3'], 2),
+#         'last_filing_date': last_filing_date,
+#         'max_report_date': max_report_date,
+#         'last_earnings_date': last_earnings_date,
+#         'next_earnings_date': next_earnings_date,
+#         'stock_price_update_datetime': stock_price_update_datetime,
+#         'price_1w_ago': price_1w_ago,
+#         'pct_chg_from_1w_ago': pct_chg_from_1w_ago,
+#         'regression_update_datetime': metrics['regression_update_datetime'].floor('s'),
+#         # 'price_1m_ago': price_1m_ago,
+#         # 'price_6m_ago': price_6m_ago,
+#         # 'price_1y_ago': price_1y_ago,
+#         'company_desc': company_desc
+#         })
+#         # st.write(results) #debug 
         
-    except Exception as e:
-        exc_type, exc_obj, tb = sys.exc_info()
-        filename = tb.tb_frame.f_code.co_filename
-        line_no = tb.tb_lineno
-        code_line = linecache.getline(filename, line_no).strip()
-        st.write(f"Error on collect data for company for {cik} on file: {filename}, line #{line_no}, code line: {code_line}: {e}")
-        return None
+#     except Exception as e:
+#         exc_type, exc_obj, tb = sys.exc_info()
+#         filename = tb.tb_frame.f_code.co_filename
+#         line_no = tb.tb_lineno
+#         code_line = linecache.getline(filename, line_no).strip()
+#         st.write(f"Error on collect data for company for {cik} on file: {filename}, line #{line_no}, code line: {code_line}: {e}")
+#         return None
 
-    print("at end of collect_data_for_company function")
-    # st.write("results",results) #debug
-    # st.stop()
-    return results
+#     print("at end of collect_data_for_company function")
+#     # st.write("results",results) #debug
+#     # st.stop()
+#     return results
 
 def update_yahoo_data_for_company(cik):
     
@@ -1308,6 +1309,7 @@ def update_yahoo_data_for_company(cik):
         trailing_pe = clean_number(yahoo_stats.get("trailingPE"))
         trailing_ps = clean_number(yahoo_stats.get("priceToSalesTrailing12Months"))
         forward_pe = clean_number(yahoo_stats.get("forwardPE"))
+        div_yield = clean_number(yahoo_stats.get("dividendYield")) or 0.0
         # last_earnings_date = yahoo_stats.get("earningsTimestamp").floor('D').to_date()
         last_earnings_datetime = yahoo_stats.get("earningsTimestamp")
         last_earnings_date = (pd.to_datetime(int(last_earnings_datetime), unit=("ms" if int(last_earnings_datetime) > 1_000_000_000_000 else "s"), utc=True).tz_convert("America/Los_Angeles").date() if last_earnings_datetime is not None else None)
@@ -1345,6 +1347,7 @@ def update_yahoo_data_for_company(cik):
         'trailing_pe' : safe_round(trailing_pe,1),
         'forward_pe' : safe_round(forward_pe,1),
         'trailing_ps' : safe_round(trailing_ps,1),
+        'div_yield' : safe_round(div_yield,1),
         'last_earnings_date': last_earnings_date,
         'next_earnings_date': next_earnings_date,
         'stock_price_update_datetime': stock_price_update_datetime,
@@ -2387,7 +2390,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 
     columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','curr_value','stock_price', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
-        'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
+        'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
+        'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
         'Last6Q_Revenue_Margin_PCT','Last6Q_Income_Margin_PCT','last_filing_date','last_earnings_date','next_earnings_date','stock_price_update_datetime',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
@@ -2477,7 +2481,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         # styled = styled.set_table_attributes('style="table-layout: fixed; width: 100%;"')
 
         cols_for_color_inc=[
-                'Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
+                'div_yield','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
@@ -2843,6 +2847,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", format='%.1f', width="small"),
                 'forward_pe':st.column_config.NumberColumn(label="P/E Fwd", format='%.1f', width="small"),
                 'trailing_ps':st.column_config.NumberColumn(label="P/S Trailing", format='%.1f', width="small"),
+                'div_yield':st.column_config.NumberColumn(label="Div Yield", format='%.1f', width="small"),
                 "Consolidated_Score": st.column_config.NumberColumn(label="Consol Value Score", format='%.1f', width="small"),
                 'Growth_Quality': st.column_config.NumberColumn(label="Growth_Quality", format='%.1f', width="small"),
                 'Recent_Momentum': st.column_config.NumberColumn(label="Recent_Momentum", format='%.1f', width="small"),
