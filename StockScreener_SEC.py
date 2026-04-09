@@ -1690,7 +1690,7 @@ def write_sec_data_into_db(load_type):
         st.write(f'new_ciks based on Yahoo earnings timestamp = {new_ciks}') #debug
         # st.stop()
 
-        cik_list=['0001368514'] #debug
+        # cik_list=['0001368514'] #debug
         print('Got list of cik to update for incremental load')
     
     # Now that you have cik_list, go get the data
