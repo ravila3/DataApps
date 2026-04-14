@@ -220,7 +220,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         empty=False #'None'
     )
     
-    touch_area = base.mark_point(
+    touch_area = (base.mark_point(
         size=800,          # large hit area
         opacity=0.001      # invisible
     ).encode(
@@ -231,7 +231,14 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             alt.Tooltip("Fitted:Q", title="Trend", format=",.0f"),
             alt.Tooltip("Growth_12m:Q", title="Growth vs 12m Ago", format=",.1%")
         ]
-    ).add_params(nearest)
+    )
+    .add_params(nearest)
+    .transform_filter("true") if ss.selected_company else
+    base.mark_point(size=0, opacity=0).encode()  # inert layer
+    )
+    
+    if ss.selected_company is None:
+        touch_area = None
 
     line = base.mark_line(color="#4C78A8").encode(
             # x="x_label:T",
@@ -2330,7 +2337,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             def color_func(s, q20=q20, q40=q40, q60=q60, q80=q80):
                 return [
                     'background-color: green' if v >= q80 else
-                    'background-color: red' if v <= q40 else
+                    'background-color: darkred' if v <= q40 else
                     ''
                     for v in s
                 ]
@@ -2347,7 +2354,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 
                     # apply original rules
                     if v >= q80:
-                        out.append('background-color: red')
+                        out.append('background-color: darkred')
                     elif v <= q40:
                         out.append('background-color: green')
                     elif v <= q60:
