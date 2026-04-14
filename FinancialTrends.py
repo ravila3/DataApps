@@ -94,7 +94,7 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
     hover = alt.selection_point(
         fields=[date, metric_name],
         nearest=True,
-        on="mouseover",
+        on="touchstart,mouseover", #on="mouseover",
         empty=False) #"none")
     
     legend_selection = alt.selection_point(
@@ -114,26 +114,12 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
             opacity=alt.condition(legend_selection, alt.value(1), alt.value(0.1)),
         ).add_params(legend_selection)
     ).properties(width=width, height=height)
-    
-    # points = alt.Chart(tdf).mark_point().encode(
-    #     x=alt.X(date, type='temporal'),
-    #     y=alt.Y(value_field, type='quantitative'), #metric_name,
-    #     color=color_encoding,
-    #     opacity=alt.condition(hover, alt.value(1), alt.value(0)),
-    #     tooltip=(
-    #         [
-    #             alt.Tooltip(date, type='temporal', format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
-    #             metric_name,
-    #             alt.Tooltip(value_field, type='quantitative', format=f'$,.{precision}f', title=value_field)
-    #         ] + ([alt.Tooltip(growth_field, type='quantitative', format='.2%', title='12m growth')] if growth_field is not None else [])
-    #     )
-    # ).add_params(hover)  #.interactive()
-    
+        
     points = (
         alt.Chart(tdf)
         .mark_point()
         .encode(
-            x=alt.X(date, type='temporal'),
+            x=alt.X(date, type='temporal',scale=alt.Scale(padding=10)),
             y=alt.Y(value_field, type='quantitative'),
             color=color_encoding,
             opacity=alt.condition(
@@ -156,8 +142,30 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
         .add_params(hover)
         .transform_filter(legend_selection)
 )
-        
-    return (lines + points) #  + tooltips
+
+    # Define the MA4 line with a conditional visibility filter
+    ma4_line = (
+        alt.Chart(tdf)
+        .transform_filter(legend_selection) # 1. Filter to only selected legend items
+        .transform_joinaggregate(
+            selected_count=f'distinct({metric_name})', # 2. Count how many remain
+        )
+        .transform_filter(
+            alt.datum.selected_count == 1 # 3. Only keep data if exactly one is selected
+        )
+        .transform_window(
+            rolling_mean=f'mean({value_field})',
+            frame=[-3, 0],
+            groupby=[metric_name]
+        )
+        .mark_line(color="#FFA500", strokeDash=[4, 4])
+        .encode(
+            x=alt.X(date, type='temporal'),
+            y=alt.Y('rolling_mean:Q')
+        )
+    )
+                    
+    return (lines + points + ma4_line) #  + tooltips
 
 #format values for Yahoo Metrics based on declared format
 def _format_value(fmt, value):
