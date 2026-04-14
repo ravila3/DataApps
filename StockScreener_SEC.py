@@ -237,9 +237,6 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     base.mark_point(size=0, opacity=0).encode()  # inert layer
     )
     
-    if ss.selected_company is None:
-        touch_area = None
-
     line = base.mark_line(color="#4C78A8").encode(
             # x="x_label:T",
             y=alt.Y(f"{var_name}:Q") #,axis=alt.Axis(grid=False)
