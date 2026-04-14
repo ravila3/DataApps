@@ -144,6 +144,11 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
 )
 
     # Define the MA4 line with a conditional visibility filter
+    if value_field=='Stock Price':
+        frame_start=-90
+    else:
+        frame_start=-3
+        
     ma4_line = (
         alt.Chart(tdf)
         .transform_filter(legend_selection) # 1. Filter to only selected legend items
@@ -155,7 +160,7 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
         )
         .transform_window(
             rolling_mean=f'mean({value_field})',
-            frame=[-3, 0],
+            frame=[frame_start, 0],
             groupby=[metric_name]
         )
         .mark_line(color="#FFA500", strokeDash=[4, 4])
@@ -618,6 +623,9 @@ def main():
                 st.altair_chart(chart_stock_price, width='stretch')
 
         # Show a compact, readable table in Streamlit using the formatted display column
+        url = f"https://finance.yahoo.com/quote/{ss.ticker}/"
+        st.write(f"Click this for the Yahoo Finance Page: {url}")
+
         show_yahoo_metrics(rows)
             
         # Format the dataframe

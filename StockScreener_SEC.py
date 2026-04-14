@@ -638,7 +638,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             with col1:
                 ticker=quarterly_df['ticker'].iloc[0]
                 url = f"https://finance.yahoo.com/quote/{ticker}/"
-                st.write("Click this for the Yahoo Finance Page (%s)" % url)
+                st.write(f"Click this for the Yahoo Finance Page: {url}")
             with col2:
                 remove_outliers = st.toggle("Remove outliers", value=False)
         else:
