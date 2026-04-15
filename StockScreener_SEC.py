@@ -1601,8 +1601,9 @@ def write_sec_data_into_db(load_type):
     
     # Now go get the rest of the data for thesee companies and run regressions, and update the stock_growth_analysis_results
     rank_companies_by_growth_and_update_DB(cik_list)
-    ss.results_df=load_stock_growth_analysis_data_from_db()
-    st.write(ss.results_df) # debug?
+    reset_forms_ss_vars()
+    # ss.results_df=load_stock_growth_analysis_data_from_db()
+    # st.write(ss.results_df) # debug?
     # st.stop() debug
     return
 
@@ -2223,7 +2224,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','curr_value','stock_price', # 'price_range_52wks',
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','curr_value','stock_price','gain_pct', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
@@ -2237,7 +2238,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     if len(ss.editable_stock_growth_analysis_df) == 0 or len(ss.rankings_df)==0: #or ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty
         print("display_stock_analysis_form: 1+ dataframes empty, reloading")
         ss.rankings_df = load_stock_growth_analysis_data_from_db()
-        column_specs=get_column_specs_results_df()
+        column_specs = get_column_specs_results_df()
         rename_map = {
             spec["pg_name"]: pretty
             for pretty, spec in column_specs.items()
@@ -2263,6 +2264,17 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             .rename(columns={'buy': 'buy_quantity', 'sell': 'sell_quantity'})
             .reset_index()
         )
+        
+        # Add buy_amount (sum of total for buy actions)
+        buy_amounts = (
+            tx[tx['action'] == 'buy']
+            .groupby('cik', as_index=False)['total']
+            .sum()
+            .rename(columns={'total': 'buy_amount'})
+        )
+
+        agg = agg.merge(buy_amounts, on='cik', how='left')
+        agg['buy_amount'] = agg['buy_amount'].fillna(0)
 
         # Ensure both columns exist (in case there were only buys or only sells)
         for col in ('buy_quantity', 'sell_quantity'):
@@ -2277,12 +2289,15 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             ss.rankings_df
             .merge(agg, on='cik', how='left')
         )
+        
         ss.rankings_df[['curr_quantity']] = (
             ss.rankings_df[['curr_quantity']]
             .fillna(0)
         )
         
         ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
+        ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['buy_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
+        ss.rankings_df['gain_pct']=((ss.rankings_df['stock_price']-ss.rankings_df['avg_cost'])/ss.rankings_df['avg_cost'])*100
 
         # st.write(f"the len(ss.rankings_df) is {len(ss.rankings_df)}") #debug
 
@@ -2316,7 +2331,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         # styled = styled.set_table_attributes('style="table-layout: fixed; width: 100%;"')
 
         cols_for_color_inc=[
-                'div_yield','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
+                'div_yield','gain_pct','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
@@ -2367,27 +2382,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             def red_func(s, q40=q40):
                 return ['background-color: red' if v <= q40 else '' for v in s]
             styled = styled.apply(red_func, subset=[col])
-
-        # th_props = [
-        #     ("white-space", "normal"),
-        #     ("overflow-wrap", "break-word"),
-        #     ("word-break", "break-word"),
-        #     ("max-width", max_col_width),
-        #     ("text-align", "left"),
-        #     ("padding", "6px")
-        # ]
-        # td_props = [
-        #     ("overflow", "hidden"),
-        #     ("text-overflow", "ellipsis"),
-        #     ("white-space", "nowrap"),
-        #     ("max-width", max_col_width)
-        # ]
-
-        # styled = styled.set_table_styles([
-        #     {"selector": "th", "props": th_props},
-        #     {"selector": "th.col_heading", "props": th_props},
-        #     {"selector": "td", "props": td_props},
-        # ])
         
         return styled
 
@@ -2674,6 +2668,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", format='%,.0f', width="small"),
                 'curr_value':st.column_config.NumberColumn(label="Curr Value", format='dollar', step='int', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
+                'gain_pct': st.column_config.NumberColumn(label="Gain %", format='%.1f', width="small"),
                 # 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
                 'Pct_Chg_from_52_Wk_High':st.column_config.NumberColumn(label="% from 52wk High²", format='%.1f', width="small"),
