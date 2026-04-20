@@ -94,7 +94,7 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
     hover = alt.selection_point(
         fields=[date, metric_name],
         nearest=True,
-        on="touchstart,mouseover", #on="mouseover",
+        on="mouseover,click", #on="touchstart,mouseover,click",
         empty=False) #"none")
     
     legend_selection = alt.selection_point(
@@ -169,6 +169,22 @@ def get_line_chart(tdf,date,metric_name,value_field,precision,width,height,growt
             y=alt.Y('rolling_mean:Q')
         )
     )
+    
+    # touch_area = (
+    #     alt.Chart(tdf)
+    #     .mark_point(size=200, opacity=0.0001)   # invisible but touchable
+    #     .encode(
+    #         x=date,
+    #         y=value_field,
+    #         tooltip=[
+    #             alt.Tooltip(date, type='temporal', format='%m/%d/%y(%a) %I%p', title="Date (PST)"),
+    #             metric_name,
+    #             alt.Tooltip(value_field, type='quantitative', format=f'$,.{precision}f', title=value_field)
+    #         ]
+    #     )
+    #     .add_params(hover)
+    #     .transform_filter(legend_selection)
+    # )
                     
     return (lines + points + ma4_line) #  + tooltips
 

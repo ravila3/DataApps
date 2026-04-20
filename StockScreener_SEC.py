@@ -2224,7 +2224,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','curr_value','stock_price','gain_pct', # 'price_range_52wks',
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','curr_value','gain_pct', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
@@ -2666,8 +2666,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", format='%,.0f', width="small"),
-                'curr_value':st.column_config.NumberColumn(label="Curr Value", format='dollar', step='int', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", format='dollar'),
+                'curr_value':st.column_config.NumberColumn(label="Curr Value", format='dollar', step='int', width="small"),
                 'gain_pct': st.column_config.NumberColumn(label="Gain %", format='%.1f', width="small"),
                 # 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", pinned=False, width="medium"),
