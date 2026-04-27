@@ -1511,13 +1511,13 @@ def write_sec_data_into_db(load_type):
 
         # build mask: filing < earnings, earnings not null, and earnings within last 7 days (inclusive)
         seven_days_ago = now_utc - pd.Timedelta(days=7)
-        tomorrow = now_utc + pd.Timedelta(days=1)
+        now_plus_one_hour = now_utc + pd.Timedelta(hours=1)
         mask = (
             df['last_filing_date'].notna()
             & df['last_earnings_date'].notna()
             & (df['last_filing_date'] < df['last_earnings_date'])
             & (df['last_earnings_date'] >= seven_days_ago)
-            & (df['last_earnings_date'] <= tomorrow)
+            & (df['last_earnings_date'] <= now_plus_one_hour)
         )
 
         # get unique CIKs and append to existing list (avoid duplicates)
