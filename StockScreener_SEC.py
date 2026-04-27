@@ -1511,12 +1511,13 @@ def write_sec_data_into_db(load_type):
 
         # build mask: filing < earnings, earnings not null, and earnings within last 7 days (inclusive)
         seven_days_ago = now_utc - pd.Timedelta(days=7)
+        tomorrow = now_utc + pd.Timedelta(days=1)
         mask = (
             df['last_filing_date'].notna()
             & df['last_earnings_date'].notna()
             & (df['last_filing_date'] < df['last_earnings_date'])
             & (df['last_earnings_date'] >= seven_days_ago)
-            & (df['last_earnings_date'] <= now_utc)
+            & (df['last_earnings_date'] <= tomorrow)
         )
 
         # get unique CIKs and append to existing list (avoid duplicates)
@@ -2250,7 +2251,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         
         # 1) Defensive copy and normalization
         tx['action'] = tx['action'].astype(str).str.strip().str.lower()   # normalize action values
-        tx['quantity'] = pd.to_numeric(tx['quantity'], errors='coerce').fillna(0)  # numeric quantities
+        tx['quantity'] = pd.to_numeric(tx['quantity'], errors='coerce') #.fillna(0)  # numeric quantities
 
         # 2) Pivot/aggregate: sum quantity by cik x action
         agg = (
@@ -2274,7 +2275,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         )
 
         agg = agg.merge(buy_amounts, on='cik', how='left')
-        agg['buy_amount'] = agg['buy_amount'].fillna(0)
+        agg['buy_amount'] = agg['buy_amount'] #.fillna(0)
 
         # Ensure both columns exist (in case there were only buys or only sells)
         for col in ('buy_quantity', 'sell_quantity'):
@@ -2327,9 +2328,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         }
     
     def build_styler(df, max_col_width: str = "140px"):
+        
         styled = df.style
-        # styled = styled.set_table_attributes('style="table-layout: fixed; width: 100%;"')
-
+        
         cols_for_color_inc=[
                 'div_yield','gain_pct','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
@@ -2382,10 +2383,11 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             def red_func(s, q40=q40):
                 return ['background-color: red' if v <= q40 else '' for v in s]
             styled = styled.apply(red_func, subset=[col])
-        
+                
         return styled
 
     disabled_cols = list(set(columns) - set(editable_columns) )
+    # st.write('disabled_cols',disabled_cols) # debug
     
     if 'chart' not in ss.editable_stock_growth_analysis_df.columns: 
         ss.editable_stock_growth_analysis_df.insert(0, "chart", False)
