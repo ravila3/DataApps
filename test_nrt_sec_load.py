@@ -1,3 +1,4 @@
+from annotated_types import doc
 import streamlit as st
 import requests
 import zipfile
@@ -55,17 +56,26 @@ def is_instance_document(text: str) -> bool:
         or "<ix:nonnumeric" in t
     )
 
-
-def extract_instance_from_zip(cik: str, folder: str, zip_name: str):
+def extract_instance_from_zip(cik, folder, zip_name):
     url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{folder}/{zip_name}"
     r = requests.get(url, headers=HEADERS)
-    r.raise_for_status()
     z = zipfile.ZipFile(io.BytesIO(r.content))
 
     for name in z.namelist():
         text = z.read(name).decode("utf-8", errors="ignore")
-        if is_instance_document(text):
+        if "<context" in text or "<xbrli:context" in text:
+            print("FOUND CONTEXTS IN:", name)
+
+
+    for name in z.namelist():
+        text = z.read(name).decode("utf-8", errors="ignore")
+
+        # The REAL instance document always contains <xbrli:xbrl>
+        if "<xbrli:xbrl" in text:
+            st.write(f"Found instance in ZIP: {name}")  # debug
             return name, text
+        else:
+            st.write(f"Checked {name} in ZIP, not an instance document")  # debug
 
     return None, None
 
@@ -132,94 +142,138 @@ def parse_units(root):
             units[uid] = measure.text.split(":")[-1]
     return units
 
-
 def extract_xml_facts(xml_text: str):
     root = ET.fromstring(xml_text)
     facts = []
-    for elem in root:
-        tag = elem.tag.split("}")[-1]
-        if not tag or not tag[0].isupper():
+
+    for elem in root.iter():
+        # Extract namespace and tag
+        if "}" in elem.tag:
+            ns, tag = elem.tag[1:].split("}")
+            # st.write(f"Found element: {ns}:  {tag}")  # debug
+            # st.write(f"Attributes: {elem.attrib}")  # debug
+            # st.write(f"Text: {elem.text}")  # debug
+        else:
             continue
+
+        # Only capture facts from known taxonomies
+        # if ns not in ("us-gaap", "dei", "ifrs-full"):
+        #     continue
+        if ns in ("xbrli", "xbrldi", "link", "xlink"):
+            continue
+
         ctx = elem.attrib.get("contextRef")
         unit = elem.attrib.get("unitRef")
         val = (elem.text or "").strip()
-        facts.append(
-            {
-                "name": tag,
-                "contextRef": ctx,
-                "unitRef": unit,
-                "value": val,
-            }
-        )
+
+        # Facts must have a contextRef
+        if ctx is None:
+            continue
+
+        facts.append({
+            "name": f"{ns}:{tag}",
+            "contextRef": ctx,
+            "unitRef": unit,
+            "value": val,
+        })
+
     return facts, root
 
 
 # ---------- Inline XBRL helpers ----------
 
+from bs4 import BeautifulSoup
+
 def extract_ixbrl_facts(html_text: str):
+    """
+    Extract inline XBRL facts from <ix:nonFraction> and <ix:nonNumeric>.
+    Returns a list of dicts with name, contextRef, unitRef, value, decimals.
+    """
     soup = BeautifulSoup(html_text, "lxml")
     facts = []
 
-    # numeric
-    for tag in soup.find_all(["ix:nonfraction", "ix:nonFraction"]):
-        facts.append(
-            {
-                "name": tag.get("name"),
-                "contextRef": tag.get("contextref"),
-                "unitRef": tag.get("unitref"),
-                "decimals": tag.get("decimals"),
-                "value": tag.text.strip(),
-            }
-        )
+    # nonFraction = numeric, nonNumeric = text / enums / extensible lists
+    for tag in soup.find_all(["ix:nonfraction", "ix:nonFraction", "ix:nonnumeric", "ix:nonNumeric"]):
+        name = tag.get("name")
+        ctx = tag.get("contextref") or tag.get("contextRef")
+        unit = tag.get("unitref") or tag.get("unitRef")
+        decimals = tag.get("decimals")
+        val = (tag.text or "").strip()
 
-    # non-numeric (we mostly care about numeric for companyfacts-like)
-    for tag in soup.find_all(["ix:nonnumeric", "ix:nonNumeric"]):
         facts.append(
             {
-                "name": tag.get("name"),
-                "contextRef": tag.get("contextref"),
-                "unitRef": None,
-                "value": tag.text.strip(),
+                "name": name,              # e.g. "us-gaap:Revenues"
+                "contextRef": ctx,         # e.g. "c-91"
+                "unitRef": unit,           # e.g. "u-1" or "USD"
+                "decimals": decimals,
+                "value": val,
             }
         )
 
     return facts
 
-def parse_ixbrl_contexts(html_text):
-    soup = BeautifulSoup(html_text, "lxml")
+
+from lxml import etree, html
+
+from lxml import etree, html
+import re
+
+def parse_ixbrl_contexts(html_text: str):
+    """
+    Extract <xbrli:context> from inline XBRL HTML.
+    Handles Workiva-style embedded XML islands.
+    """
+    XBRLI = "http://www.xbrl.org/2003/instance"
+
+    st.write(html_text) #debug
+
+    # 1. Extract ALL embedded XML fragments from <script> or hidden <div>
+    xml_fragments = re.findall(
+        r"<xbrli:xbrl[\s\S]*?</xbrli:xbrl>",
+        html_text,
+        flags=re.IGNORECASE
+    )
+    
+    st.write("xml_framents",xml_fragments) #debug
+
+    doc = html.fromstring(html_text.encode("utf-8",errors="ignore"))
+    ctx_nodes = doc.xpath('//*[local-name()="context"]')
+    st.write("ctx_nodes",ctx_nodes) #debug
+
     contexts = {}
 
-    # Find ANY tag whose name ends with "context"
-    for ctx in soup.find_all(lambda tag: tag.name.lower().endswith("context")):
-        cid = ctx.get("id")
-        if not cid:
+    for frag in xml_fragments:
+        st.write(f"Parsing XML fragment:\n{frag[:200]}...")  # debug
+        try:
+            root = etree.fromstring(frag.encode("utf-8"))
+        except Exception:
             continue
 
-        # Find period inside this context
-        period = None
-        for child in ctx.descendants:
-            if hasattr(child, "name") and child.name and child.name.lower().endswith("period"):
-                period = child
-                break
+        # 2. Find all <xbrli:context> inside this fragment
+        for ctx in root.xpath('//*[local-name()="context" and namespace-uri()=$ns]',
+                              ns=XBRLI):
 
-        if not period:
-            continue
+            cid = ctx.get("id")
+            if not cid or cid in contexts:
+                continue
 
-        def find_date(tag, suffix):
-            for child in tag.descendants:
-                if hasattr(child, "name") and child.name and child.name.lower().endswith(suffix):
-                    return child.text.strip()
-            return None
+            # 3. Extract period
+            period = ctx.find(f"{{{XBRLI}}}period")
+            if period is None:
+                contexts[cid] = {"start": None, "end": None, "instant": None}
+                continue
 
-        start = find_date(period, "startdate")
-        end = find_date(period, "enddate")
-        instant = find_date(period, "instant")
+            start = period.find(f"{{{XBRLI}}}startDate")
+            end = period.find(f"{{{XBRLI}}}endDate")
+            instant = period.find(f"{{{XBRLI}}}instant")
 
-        contexts[cid] = {
-            "start": start,
-            "end": end,
-            "instant": instant,
-        }
+            contexts[cid] = {
+                "start": start.text.strip() if start is not None else None,
+                "end": end.text.strip() if end is not None else None,
+                "instant": instant.text.strip() if instant is not None else None,
+            }
+
+    st.write("parsed contexts:", contexts) #debug
 
     return contexts
 
@@ -229,14 +283,16 @@ def normalize_facts(facts, contexts, units, accn, form):
     out = {"us-gaap": {}}
 
     for f in facts:
-        st.write(f)  # debug
+        # st.write(f)  # debug
         name = f.get("name")
         if not name:
             continue
 
         tag = name.split(":")[-1]
         ctx = f.get("contextRef")
-        st.write(f"Processing fact: {tag}, context: {ctx}")  # debug
+        if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
+            st.write(f"Processing fact: {tag}, context: {ctx}")  # debug
+            st.write("f:", f)  # debug
         unit = f.get("unitRef")
         val_raw = f.get("value")
 
@@ -249,6 +305,8 @@ def normalize_facts(facts, contexts, units, accn, form):
             continue
 
         c = contexts.get(ctx, {})
+        if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
+            st.write(f"Context for {ctx}: {c}")  # debug
         start = c.get("start")
         end = c.get("end")
         instant = c.get("instant")
@@ -262,7 +320,14 @@ def normalize_facts(facts, contexts, units, accn, form):
         fp = f"Q{((dt.month - 1) // 3) + 1}"
         frame = f"CY{fy}{fp}"
 
-        unit_label = units.get(unit, "USD")
+        # Convert unitRef → string label
+        if unit in units:
+            measures = units[unit].get("measures", [])
+            unit_label = measures[0] if measures else unit
+        else:
+            unit_label = unit
+
+        # st.write("unit_label:", unit_label)  # debug
 
         out["us-gaap"].setdefault(tag, {"units": {}})
         out["us-gaap"][tag]["units"].setdefault(unit_label, [])
@@ -280,7 +345,113 @@ def normalize_facts(facts, contexts, units, accn, form):
             }
         )
 
+        if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
+            st.write(f"Final normalized fact for {tag}:", out["us-gaap"].get(tag))  # debug
+
     return out
+
+from lxml import etree
+
+def parse_ixbrl_units(html_text: str):
+    """
+    Extract <xbrli:unit> blocks embedded in inline XBRL HTML.
+    Handles:
+      - simple units (<measure>)
+      - compound units (<divide>)
+      - numerator/denominator structures
+    Returns:
+      { unit_id: { "measures": [ "iso4217:USD" ] } }
+      or for divide:
+      { unit_id: { "measures": [ "iso4217:USD/xbrli:shares" ] } }
+    """
+    parser = etree.XMLParser(recover=True)
+    tree = etree.fromstring(html_text.encode("utf-8"), parser=parser)
+
+    ns = {
+        "xbrli": "http://www.xbrl.org/2003/instance",
+    }
+
+    units = {}
+
+    for unit in tree.xpath("//xbrli:unit", namespaces=ns):
+        uid = unit.get("id")
+        if not uid:
+            continue
+
+        # ---------------------------------------------------------
+        # CASE 1: Simple unit
+        #   <xbrli:unit id="u-1">
+        #       <xbrli:measure>iso4217:USD</xbrli:measure>
+        #   </xbrli:unit>
+        # ---------------------------------------------------------
+        measures = [m.text for m in unit.findall("xbrli:measure", namespaces=ns) if m.text]
+
+        if measures:
+            units[uid] = {"measures": measures}
+            continue
+
+        # ---------------------------------------------------------
+        # CASE 2: Divide unit (EPS, ratios)
+        #   <xbrli:unit id="u-2">
+        #       <xbrli:divide>
+        #           <xbrli:unitNumerator>
+        #               <xbrli:measure>iso4217:USD</xbrli:measure>
+        #           </xbrli:unitNumerator>
+        #           <xbrli:unitDenominator>
+        #               <xbrli:measure>xbrli:shares</xbrli:measure>
+        #           </xbrli:unitDenominator>
+        #       </xbrli:divide>
+        #   </xbrli:unit>
+        # ---------------------------------------------------------
+        divide = unit.find("xbrli:divide", namespaces=ns)
+        if divide is not None:
+            num = divide.find("xbrli:unitNumerator/xbrli:measure", namespaces=ns)
+            den = divide.find("xbrli:unitDenominator/xbrli:measure", namespaces=ns)
+
+            if num is not None and den is not None:
+                label = f"{num.text}/{den.text}"
+                units[uid] = {"measures": [label]}
+                continue
+
+        # ---------------------------------------------------------
+        # CASE 3: Unknown / fallback
+        # ---------------------------------------------------------
+        units[uid] = {"measures": []}
+
+    return units
+
+def normalize_ixbrl_facts(ix_facts, contexts, units, accn: str, form_type: str):
+    """
+    Normalize inline facts into a companyfacts-like structure.
+    Returns a list of normalized fact dicts.
+    """
+    normalized = []
+
+    for f in ix_facts:
+        ctx_id = f["contextRef"]
+        unit_id = f["unitRef"]
+
+        ctx = contexts.get(ctx_id, {})
+        unit = units.get(unit_id, {"measures": [unit_id] if unit_id else []})
+
+        norm = {
+            "accn": accn,
+            "form": form_type,
+            "name": f["name"],                 # e.g. "us-gaap:Revenues"
+            "contextRef": ctx_id,
+            "unitRef": unit_id,
+            "measures": unit.get("measures"),
+            "value": f["value"],
+            "decimals": f.get("decimals"),
+            "start": ctx.get("start"),
+            "end": ctx.get("end"),
+            "instant": ctx.get("instant"),
+        }
+        st.write(f"Normalized fact: {norm}")  # debug
+
+        normalized.append(norm)
+
+    return normalized
 
 
 # ---------- Full pipeline ----------
@@ -288,41 +459,33 @@ def normalize_facts(facts, contexts, units, accn, form):
 def fetch_and_normalize_latest_10q(cik: str):
     accn = get_latest_10q_accession(cik)
     if not accn:
-        raise ValueError("No 10-Q found for CIK " + cik)
+        raise ValueError(f"No 10-Q found for CIK {cik}")
 
     folder = accession_to_folder(accn)
     index_json = get_filing_index_json(cik, folder)
 
     filename, content = find_instance_document(cik, folder, index_json)
 
-    st.write(content)  # debug
-    # If inline XBRL, we still need contexts/units from XML (usually in ZIP)
     if filename.lower().endswith(".htm"):
-        # Inline XBRL detected — ignore it
-        # Always extract the XML instance from the ZIP
-        zip_name = next(
-            item["name"] for item in index_json["directory"]["item"]
-            if item["name"].lower().endswith(".zip")
-        )
+        # Inline XBRL is the ONLY instance document
+        ix_facts = extract_ixbrl_facts(content)          # <ix:nonFraction>, <ix:nonNumeric>
+        contexts = parse_ixbrl_contexts(content)         # <xbrli:context> inside HTML
+        units = parse_ixbrl_units(content)               # <xbrli:unit> inside HTML (you need this too)
 
-        xml_fname, xml_text = extract_instance_from_zip(cik, folder, zip_name)
-        if not xml_text:
-            raise ValueError("Could not extract XML instance from ZIP")
+        normalized = normalize_facts(ix_facts, contexts, units, accn, "10-Q")
+        return accn, filename, normalized
 
-        xml_facts, root = extract_xml_facts(xml_text)
-        contexts = parse_contexts(root)
-        units = parse_units(root)
-
-        normalized = normalize_facts(xml_facts, contexts, units, accn, "10-Q")
-
+    # ---------------------------------------------------------
+    # PURE XML BRANCH
+    # ---------------------------------------------------------
     else:
-        # pure XML instance
         xml_facts, root = extract_xml_facts(content)
         contexts = parse_contexts(root)
         units = parse_units(root)
-        normalized = normalize_facts(xml_facts, contexts, units, accn, "10-Q")
 
-    return accn, filename, normalized
+        normalized = normalize_facts(xml_facts, contexts, units, accn, "10-Q")
+        return accn, filename, normalized
+
 
 if __name__ == "__main__":
     CIK = "0001030894"  # change as needed

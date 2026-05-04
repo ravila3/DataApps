@@ -1224,6 +1224,10 @@ def rank_companies_by_growth_and_update_DB(cik_list):
     
     # if ss.quarterly_financials is None or ss.quarterly_financials.empty:
     ss.quarterly_financials = load_quarterly_sec_data_from_db()
+    
+    if ss.rankings_df is None or ss.rankings_df.empty:
+        ss.rankings_df = load_stock_growth_analysis_data_from_db()
+    
     st.toast('Read SEC Quarterly Financial Data from DB')
 
     # st.write(ss.quarterly_financials) # debug
