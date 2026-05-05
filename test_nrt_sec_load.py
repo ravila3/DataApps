@@ -6,6 +6,8 @@ import io
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from bs4 import BeautifulSoup
+from lxml import etree, html
+
 
 BASE = "https://data.sec.gov"
 HEADERS = {
@@ -26,7 +28,6 @@ def get_latest_10q_accession(cik: str):
             return accn  # e.g. "0001030894-26-000032"
     return None
 
-
 def accession_to_folder(accn: str) -> str:
     return accn.replace("-", "")
 
@@ -43,7 +44,6 @@ def download_file(cik: str, folder: str, filename: str) -> str:
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.text
-
 
 # ---------- Instance detection ----------
 
@@ -200,80 +200,74 @@ def extract_ixbrl_facts(html_text: str):
         decimals = tag.get("decimals")
         val = (tag.text or "").strip()
 
-        facts.append(
-            {
-                "name": name,              # e.g. "us-gaap:Revenues"
-                "contextRef": ctx,         # e.g. "c-91"
-                "unitRef": unit,           # e.g. "u-1" or "USD"
-                "decimals": decimals,
+        if decimals:
+            facts.append(
+                {
+                    "name": name,              # e.g. "us-gaap:Revenues"
+                    "contextRef": ctx,         # e.g. "c-91"
+                    "unitRef": unit,           # e.g. "u-1" or "USD"
+                    "decimals": decimals,
                 "value": val,
             }
         )
+    
+    # st.write("facts:", facts) #debug
 
     return facts
-
-
-from lxml import etree, html
-
-from lxml import etree, html
-import re
 
 def parse_ixbrl_contexts(html_text: str):
     """
     Extract <xbrli:context> from inline XBRL HTML.
     Handles Workiva-style embedded XML islands.
     """
-    XBRLI = "http://www.xbrl.org/2003/instance"
+    # XBRLI = "http://www.xbrl.org/2003/instance"
 
-    st.write(html_text) #debug
-
-    # 1. Extract ALL embedded XML fragments from <script> or hidden <div>
-    xml_fragments = re.findall(
-        r"<xbrli:xbrl[\s\S]*?</xbrli:xbrl>",
-        html_text,
-        flags=re.IGNORECASE
-    )
+    st.write('html text:',html_text) #debug
     
-    st.write("xml_framents",xml_fragments) #debug
+    # Register namespaces you expect to see
+    NS = {
+        "xbrli": "http://www.xbrl.org/2003/instance",
+        "xbrldi": "http://xbrl.org/2006/xbrldi"
+    }
 
-    doc = html.fromstring(html_text.encode("utf-8",errors="ignore"))
-    ctx_nodes = doc.xpath('//*[local-name()="context"]')
-    st.write("ctx_nodes",ctx_nodes) #debug
+    parser = etree.XMLParser(recover=True, huge_tree=True)
+    root = etree.fromstring(html_text.encode("utf-8"), parser)
+    # root = html.fromstring(html_text.encode("utf-8"), parser=html.HTMLParser())
 
-    contexts = {}
+    contexts = []
 
-    for frag in xml_fragments:
-        st.write(f"Parsing XML fragment:\n{frag[:200]}...")  # debug
-        try:
-            root = etree.fromstring(frag.encode("utf-8"))
-        except Exception:
-            continue
+    for ctx in root.xpath("//xbrli:context", namespaces=NS):
+        ctx_id = ctx.get("id")
 
-        # 2. Find all <xbrli:context> inside this fragment
-        for ctx in root.xpath('//*[local-name()="context" and namespace-uri()=$ns]',
-                              ns=XBRLI):
+        # Find all explicit members inside this context
+        start = ctx.xpath(".//xbrli:period/xbrli:startDate/text()", namespaces=NS)
+        end = ctx.xpath(".//xbrli:period/xbrli:endDate/text()", namespaces=NS)
+        instant = ctx.xpath(".//xbrli:period/xbrli:instant/text()", namespaces=NS)
+        start_date = start[0] if start else None
+        end_date = end[0] if end else None
+        instant_date = instant[0] if instant else None
+        
+        if end_date is None and instant_date is not None:
+            end_date = instant_date
 
-            cid = ctx.get("id")
-            if not cid or cid in contexts:
-                continue
+        # members = ctx.xpath(".//xbrldi:explicitMember", namespaces=NS)
 
-            # 3. Extract period
-            period = ctx.find(f"{{{XBRLI}}}period")
-            if period is None:
-                contexts[cid] = {"start": None, "end": None, "instant": None}
-                continue
-
-            start = period.find(f"{{{XBRLI}}}startDate")
-            end = period.find(f"{{{XBRLI}}}endDate")
-            instant = period.find(f"{{{XBRLI}}}instant")
-
-            contexts[cid] = {
-                "start": start.text.strip() if start is not None else None,
-                "end": end.text.strip() if end is not None else None,
-                "instant": instant.text.strip() if instant is not None else None,
-            }
-
-    st.write("parsed contexts:", contexts) #debug
+        # segs = []
+        # for m in members:
+        #     segs.append({
+        #         "dimension": m.get("dimension"),
+        #         "member": (m.text or "").strip()
+        #     })
+        
+        contexts.append({
+            "context_id": ctx_id,
+            "start": start_date,
+            "end": end_date,
+        #    "instant": instant_date,   
+        #     "segments": segs
+        })
+        
+    # st.write("contexts",contexts) #debug
 
     return contexts
 
@@ -290,9 +284,9 @@ def normalize_facts(facts, contexts, units, accn, form):
 
         tag = name.split(":")[-1]
         ctx = f.get("contextRef")
-        if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
-            st.write(f"Processing fact: {tag}, context: {ctx}")  # debug
-            st.write("f:", f)  # debug
+        # if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
+        #     st.write(f"Processing fact: {tag}, context: {ctx}")  # debug
+        #     st.write("f:", f)  # debug
         unit = f.get("unitRef")
         val_raw = f.get("value")
 
@@ -305,17 +299,17 @@ def normalize_facts(facts, contexts, units, accn, form):
             continue
 
         c = contexts.get(ctx, {})
-        if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
-            st.write(f"Context for {ctx}: {c}")  # debug
+        #if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
+        #    st.write(f"Context for {ctx}: {c}")  # debug
         start = c.get("start")
         end = c.get("end")
-        instant = c.get("instant")
+        # instant = c.get("instant")
 
-        dt_str = end or instant
-        if not dt_str:
-            continue
+        # dt_str = end or instant
+        #if not dt_str:
+        #    continue
 
-        dt = datetime.fromisoformat(dt_str)
+        dt = datetime.fromisoformat(end)
         fy = dt.year
         fp = f"Q{((dt.month - 1) // 3) + 1}"
         frame = f"CY{fy}{fp}"
@@ -333,7 +327,10 @@ def normalize_facts(facts, contexts, units, accn, form):
         out["us-gaap"][tag]["units"].setdefault(unit_label, [])
 
         out["us-gaap"][tag]["units"][unit_label].append(
+        # out["us-gaap"][tag].append(
             {
+                "metric": tag,
+                "units": unit_label,
                 "start": start,
                 "end": end,
                 "val": val,
@@ -345,8 +342,8 @@ def normalize_facts(facts, contexts, units, accn, form):
             }
         )
 
-        if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
-            st.write(f"Final normalized fact for {tag}:", out["us-gaap"].get(tag))  # debug
+        # if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
+        #     st.write(f"Final normalized fact for {tag}:", out["us-gaap"].get(tag))  # debug
 
     return out
 
@@ -445,9 +442,9 @@ def normalize_ixbrl_facts(ix_facts, contexts, units, accn: str, form_type: str):
             "decimals": f.get("decimals"),
             "start": ctx.get("start"),
             "end": ctx.get("end"),
-            "instant": ctx.get("instant"),
+#            "instant": ctx.get("instant"),
         }
-        st.write(f"Normalized fact: {norm}")  # debug
+        st.write(f"Normalized fact:",norm)  # debug
 
         normalized.append(norm)
 
@@ -470,6 +467,7 @@ def fetch_and_normalize_latest_10q(cik: str):
         # Inline XBRL is the ONLY instance document
         ix_facts = extract_ixbrl_facts(content)          # <ix:nonFraction>, <ix:nonNumeric>
         contexts = parse_ixbrl_contexts(content)         # <xbrli:context> inside HTML
+        contexts = {c["context_id"]: c for c in contexts}  # convert to dict for easy lookup
         units = parse_ixbrl_units(content)               # <xbrli:unit> inside HTML (you need this too)
 
         normalized = normalize_facts(ix_facts, contexts, units, accn, "10-Q")
