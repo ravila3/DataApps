@@ -21,11 +21,14 @@ def get_latest_10q_accession(cik: str):
     r = requests.get(url, headers=HEADERS)
     r.raise_for_status()
     data = r.json()
+    # st.write("submission data",data) #debug
 
     recent = data["filings"]["recent"]
+    name=data.get("name")
     for form, accn in zip(recent["form"], recent["accessionNumber"]):
         if form == "10-Q":
-            return accn  # e.g. "0001030894-26-000032"
+            filed_date = recent["filingDate"][recent["form"].index(form)]
+            return name, accn, filed_date  # e.g. "0001030894-26-000032"
     return None
 
 def accession_to_folder(accn: str) -> str:
@@ -179,7 +182,6 @@ def extract_xml_facts(xml_text: str):
 
     return facts, root
 
-
 # ---------- Inline XBRL helpers ----------
 
 from bs4 import BeautifulSoup
@@ -216,55 +218,54 @@ def extract_ixbrl_facts(html_text: str):
     return facts
 
 def parse_ixbrl_contexts(html_text: str):
-    """
-    Extract <xbrli:context> from inline XBRL HTML.
-    Handles Workiva-style embedded XML islands.
-    """
-    # XBRLI = "http://www.xbrl.org/2003/instance"
-
-    st.write('html text:',html_text) #debug
-    
-    # Register namespaces you expect to see
     NS = {
         "xbrli": "http://www.xbrl.org/2003/instance",
         "xbrldi": "http://xbrl.org/2006/xbrldi"
     }
 
+    # st.write("html_text",html_text) #debug
+
     parser = etree.XMLParser(recover=True, huge_tree=True)
     root = etree.fromstring(html_text.encode("utf-8"), parser)
-    # root = html.fromstring(html_text.encode("utf-8"), parser=html.HTMLParser())
 
     contexts = []
 
     for ctx in root.xpath("//xbrli:context", namespaces=NS):
         ctx_id = ctx.get("id")
 
-        # Find all explicit members inside this context
-        start = ctx.xpath(".//xbrli:period/xbrli:startDate/text()", namespaces=NS)
-        end = ctx.xpath(".//xbrli:period/xbrli:endDate/text()", namespaces=NS)
-        instant = ctx.xpath(".//xbrli:period/xbrli:instant/text()", namespaces=NS)
-        start_date = start[0] if start else None
-        end_date = end[0] if end else None
-        instant_date = instant[0] if instant else None
-        
-        if end_date is None and instant_date is not None:
-            end_date = instant_date
+        # DIRECT CHILD ONLY — critical fix
+        period = ctx.find("xbrli:period", namespaces=NS)
 
-        # members = ctx.xpath(".//xbrldi:explicitMember", namespaces=NS)
+        if period is None:
+            contexts.append({"context_id": ctx_id, "start": None, "end": None})
+            continue
 
-        # segs = []
-        # for m in members:
-        #     segs.append({
-        #         "dimension": m.get("dimension"),
-        #         "member": (m.text or "").strip()
-        #     })
-        
+        start_el = period.find("xbrli:startDate", namespaces=NS)
+        end_el = period.find("xbrli:endDate", namespaces=NS)
+        instant_el = period.find("xbrli:instant", namespaces=NS)
+
+        start = start_el.text if start_el is not None else None
+        end = end_el.text if end_el is not None else None
+        instant = instant_el.text if instant_el is not None else None
+
+        # instant contexts behave like end-only contexts
+        if end is None and instant is not None:
+            end = instant
+            
+        members = ctx.findall(".//xbrli:segment/xbrldi:explicitMember", namespaces=NS)
+
+        segments = []
+        for m in members:
+            segments.append({
+                "dimension": m.get("dimension"),
+                "member": (m.text or "").strip()
+            })
+
         contexts.append({
             "context_id": ctx_id,
-            "start": start_date,
-            "end": end_date,
-        #    "instant": instant_date,   
-        #     "segments": segs
+            "start": start,
+            "end": end,
+            "segments": segments
         })
         
     # st.write("contexts",contexts) #debug
@@ -273,16 +274,33 @@ def parse_ixbrl_contexts(html_text: str):
 
 # ---------- Normalization ----------
 
-def normalize_facts(facts, contexts, units, accn, form):
-    out = {"us-gaap": {}}
-
+def normalize_facts(cik, entity_name, filed_date, facts, contexts, units, accn, form):
+    # out = {"us-gaap": {}}
+    out = {
+        "cik": cik,
+        "entityName": entity_name,
+        "facts": {}
+    }
+ 
     for f in facts:
         # st.write(f)  # debug
         name = f.get("name")
         if not name:
             continue
 
-        tag = name.split(":")[-1]
+        # namespace + tag
+        if ":" in name:
+            prefix, tag = name.split(":", 1)
+        else:
+            prefix, tag = None, name
+
+        # map namespace → taxonomy bucket
+        if prefix in ("us-gaap", "ifrs-full", "dei"):
+            taxonomy = prefix
+        else:
+            taxonomy = "custom"
+
+        # tag = name.split(":")[-1]
         ctx = f.get("contextRef")
         # if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
         #     st.write(f"Processing fact: {tag}, context: {ctx}")  # debug
@@ -297,6 +315,15 @@ def normalize_facts(facts, contexts, units, accn, form):
             val = float(val_raw.replace(",", ""))
         except Exception:
             continue
+        
+        decimals = f.get("decimals")
+        if decimals and decimals != "INF":
+            try:
+                val = val * (10 ** abs(int(decimals)))
+            except Exception:
+                pass
+            
+        # st.write(f"After applying decimals: {val}, (decimals: {decimals})")  # debug
 
         c = contexts.get(ctx, {})
         #if tag=="RevenueFromContractWithCustomerExcludingAssessedTax":
@@ -323,14 +350,21 @@ def normalize_facts(facts, contexts, units, accn, form):
 
         # st.write("unit_label:", unit_label)  # debug
 
-        out["us-gaap"].setdefault(tag, {"units": {}})
-        out["us-gaap"][tag]["units"].setdefault(unit_label, [])
+        out["facts"].setdefault(taxonomy, {})
+        out["facts"][taxonomy].setdefault(tag, {"units": {}})
+        out["facts"][taxonomy][tag]["units"].setdefault(unit_label, [])
 
-        out["us-gaap"][tag]["units"][unit_label].append(
+        # Skip segmented contexts
+        if c.get("segments"):
+            continue
+
+        out["facts"][taxonomy][tag]["units"][unit_label].append(
         # out["us-gaap"][tag].append(
             {
-                "metric": tag,
+                # "metric": tag,
                 "units": unit_label,
+                # "context": ctx,
+                # "segment": c.get("segments", []),
                 "start": start,
                 "end": end,
                 "val": val,
@@ -339,6 +373,7 @@ def normalize_facts(facts, contexts, units, accn, form):
                 "fy": fy,
                 "fp": fp,
                 "frame": frame,
+                "filed": filed_date
             }
         )
 
@@ -347,7 +382,8 @@ def normalize_facts(facts, contexts, units, accn, form):
 
     return out
 
-from lxml import etree
+def strip_prefix(measure: str):
+    return measure.split(":", 1)[-1] if ":" in measure else measure
 
 def parse_ixbrl_units(html_text: str):
     """
@@ -381,7 +417,8 @@ def parse_ixbrl_units(html_text: str):
         #       <xbrli:measure>iso4217:USD</xbrli:measure>
         #   </xbrli:unit>
         # ---------------------------------------------------------
-        measures = [m.text for m in unit.findall("xbrli:measure", namespaces=ns) if m.text]
+        # measures = [m.text for m in unit.findall("xbrli:measure", namespaces=ns) if m.text]
+        measures = [strip_prefix(m.text) for m in unit.findall("xbrli:measure", namespaces=ns) if m.text]
 
         if measures:
             units[uid] = {"measures": measures}
@@ -417,49 +454,18 @@ def parse_ixbrl_units(html_text: str):
 
     return units
 
-def normalize_ixbrl_facts(ix_facts, contexts, units, accn: str, form_type: str):
-    """
-    Normalize inline facts into a companyfacts-like structure.
-    Returns a list of normalized fact dicts.
-    """
-    normalized = []
-
-    for f in ix_facts:
-        ctx_id = f["contextRef"]
-        unit_id = f["unitRef"]
-
-        ctx = contexts.get(ctx_id, {})
-        unit = units.get(unit_id, {"measures": [unit_id] if unit_id else []})
-
-        norm = {
-            "accn": accn,
-            "form": form_type,
-            "name": f["name"],                 # e.g. "us-gaap:Revenues"
-            "contextRef": ctx_id,
-            "unitRef": unit_id,
-            "measures": unit.get("measures"),
-            "value": f["value"],
-            "decimals": f.get("decimals"),
-            "start": ctx.get("start"),
-            "end": ctx.get("end"),
-#            "instant": ctx.get("instant"),
-        }
-        st.write(f"Normalized fact:",norm)  # debug
-
-        normalized.append(norm)
-
-    return normalized
-
 
 # ---------- Full pipeline ----------
 
 def fetch_and_normalize_latest_10q(cik: str):
-    accn = get_latest_10q_accession(cik)
+    entity_name, accn, filed_date = get_latest_10q_accession(cik)
     if not accn:
         raise ValueError(f"No 10-Q found for CIK {cik}")
 
+    # st.write(f"Latest 10-Q for {entity_name} (CIK {cik}): {accn}")  # debug
     folder = accession_to_folder(accn)
     index_json = get_filing_index_json(cik, folder)
+    # st.write("index_json",index_json) #debug
 
     filename, content = find_instance_document(cik, folder, index_json)
 
@@ -470,7 +476,7 @@ def fetch_and_normalize_latest_10q(cik: str):
         contexts = {c["context_id"]: c for c in contexts}  # convert to dict for easy lookup
         units = parse_ixbrl_units(content)               # <xbrli:unit> inside HTML (you need this too)
 
-        normalized = normalize_facts(ix_facts, contexts, units, accn, "10-Q")
+        normalized = normalize_facts(cik, entity_name, filed_date, ix_facts, contexts, units, accn, "10-Q")
         return accn, filename, normalized
 
     # ---------------------------------------------------------
@@ -484,12 +490,12 @@ def fetch_and_normalize_latest_10q(cik: str):
         normalized = normalize_facts(xml_facts, contexts, units, accn, "10-Q")
         return accn, filename, normalized
 
-
-if __name__ == "__main__":
-    CIK = "0001030894"  # change as needed
-    accn, fname, data = fetch_and_normalize_latest_10q(CIK)
+def edgar_get_latest_10q_10k_facts(cik: str):
+    #cik = "0001802665" #"0001030894"  #debug
+    accn, fname, data = fetch_and_normalize_latest_10q(cik)
+    # st.write('latest 10q/10k data', data) #debug
 
     print("Accession:", accn)
     print("Instance file:", fname)
-    print("Top-level us-gaap keys:", list(data["us-gaap"].keys())[:20])
-    st.json(data)
+    #    print("Top-level us-gaap keys:", list(data[taxonomy].keys())[:20])
+    return data

@@ -1484,10 +1484,10 @@ def write_sec_data_into_db(load_type):
     
     if load_type == 'incremental':
         stock_growth_analysis_df = load_stock_growth_analysis_data_from_db()
-        stock_growth_analysis_df['last_filing_date'] = pd.to_datetime(
-                stock_growth_analysis_df['last_filing_date'],
-                errors='coerce'
-            )
+        stock_growth_analysis_df['last_filing_date'] = pd.to_datetime(stock_growth_analysis_df['last_filing_date'],errors='coerce')
+        stock_growth_analysis_df['max_report_date'] = pd.to_datetime(stock_growth_analysis_df['max_report_date'],errors='coerce')
+        stock_growth_analysis_df['next_earnings_date'] = pd.to_datetime(stock_growth_analysis_df['next_earnings_date'],errors='coerce')
+        
         df = stock_growth_analysis_df.dropna(subset=['last_filing_date'])
         # st.write(df) #debug
         last_date_loaded=pd.to_datetime(df['last_filing_date'].max(), errors='coerce')
@@ -1495,43 +1495,59 @@ def write_sec_data_into_db(load_type):
         # st.write(last_date_loaded) #debug
         filings_10q_10k_df = load_daily_SEC_submission_index(last_date_loaded, forms_filter_list=['10-Q','10-K']) # '8-K'
         # st.write("filings_10q_10k_df",filings_10q_10k_df) #debug
-        merged_sec_filings=filings_10q_10k_df.merge(stock_growth_analysis_df[['cik','last_filing_date']],on='cik', how='left')
+        merged_sec_filings=filings_10q_10k_df.merge(stock_growth_analysis_df[['cik','last_filing_date','max_report_date']],on='cik', how='left')
         # st.write('merged_sec_filings',merged_sec_filings) #debug
         filtered_sec_filings = merged_sec_filings.loc[
             (merged_sec_filings['date'] > merged_sec_filings['last_filing_date'])
-            # | merged_sec_filings['last_filing_date'].isna()
         ]
 
         st.write('SEC Filings to Load',filtered_sec_filings)
         cik_list=filtered_sec_filings['cik'].to_list()
 
-        # Now get list of companies that Yahoo says will have earnings reported (to get timely data instead of next day)
-        df = stock_growth_analysis_df.copy()
-        df['last_filing_date'] = pd.to_datetime(df['last_filing_date'], errors='coerce', utc=True)
-        df['last_earnings_date'] = pd.to_datetime(df['last_earnings_date'], errors='coerce', utc=True)
+        cutoff_old = datetime.now() - timedelta(days=90)
+        cutoff_future = datetime.now() + timedelta(days=30)
 
-        # reference now in UTC (or choose a timezone you prefer)
-        now_utc = pd.Timestamp.now(tz="UTC")
+        old_reports_df = stock_growth_analysis_df.loc[
+            (stock_growth_analysis_df['max_report_date'] < cutoff_old) &
+            (stock_growth_analysis_df['max_report_date'] > (cutoff_old - timedelta(days=90))) &
+            (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60)) &
+            (
+            (stock_growth_analysis_df['next_earnings_date'] > cutoff_future) |
+            (stock_growth_analysis_df['next_earnings_date'].isna())
+            )
+            ,['cik','company_and_ticker','last_filing_date','max_report_date','last_earnings_date','next_earnings_date']
+        ]
+        st.write('Companies with old reporting dates (potentially stale data)',old_reports_df)
+        cik_list = list(set(cik_list + old_reports_df['cik'].tolist()))
+
+        # Now get list of companies that Yahoo says will have earnings reported (to get timely data instead of next day)
+#        df = stock_growth_analysis_df.copy()
+#        df['last_filing_date'] = pd.to_datetime(df['last_filing_date'], errors='coerce', utc=True)
+#        df['max_report_date'] = pd.to_datetime(df['max_report_date'], errors='coerce', utc=True)
+#        df['last_earnings_date'] = pd.to_datetime(df['last_earnings_date'], errors='coerce', utc=True)
+
+#        # reference now in UTC (or choose a timezone you prefer)
+#        now_utc = pd.Timestamp.now(tz="UTC")
 
         # build mask: filing < earnings, earnings not null, and earnings within last 7 days (inclusive)
-        seven_days_ago = now_utc - pd.Timedelta(days=7)
-        now_plus_one_hour = now_utc + pd.Timedelta(hours=1)
-        mask = (
-            df['last_filing_date'].notna()
-            & df['last_earnings_date'].notna()
-            & (df['last_filing_date'] < df['last_earnings_date'])
-            & (df['last_earnings_date'] >= seven_days_ago)
-            & (df['last_earnings_date'] <= now_plus_one_hour)
-        )
+#        seven_days_ago = now_utc - pd.Timedelta(days=7)
+#        now_plus_one_hour = now_utc + pd.Timedelta(hours=1)
+#        mask = (
+#            df['last_filing_date'].notna()
+#            & df['last_earnings_date'].notna()
+#            & (df['last_filing_date'] < df['last_earnings_date'])
+#            & (df['last_earnings_date'] >= seven_days_ago)
+#            & (df['last_earnings_date'] <= now_plus_one_hour)
+#        )
 
-        # get unique CIKs and append to existing list (avoid duplicates)
-        new_ciks = df.loc[mask, 'cik'].dropna().astype(str).unique().tolist()
-        cik_list += [c for c in new_ciks if c not in cik_list]
-        st.write(f'new_ciks based on Yahoo earnings timestamp = {new_ciks}') #debug
-        # st.stop()
+#        # get unique CIKs and append to existing list (avoid duplicates)
+#        new_ciks = df.loc[mask, 'cik'].dropna().astype(str).unique().tolist()
+#        cik_list += [c for c in new_ciks if c not in cik_list]
+#        st.write(f'new_ciks based on Yahoo earnings timestamp = {new_ciks}') #debug
+#        # st.stop()
 
-        # cik_list=['0001368514'] #debug
-        print('Got list of cik to update for incremental load')
+#        # cik_list=['0001368514'] #debug
+#        print('Got list of cik to update for incremental load')
     
     # Now that you have cik_list, go get the data
     if len(cik_list)==0:
@@ -2234,7 +2250,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
-        'Last6Q_Revenue_Margin_PCT','Last6Q_Income_Margin_PCT','last_filing_date','last_earnings_date','next_earnings_date','stock_price_update_datetime',
+        'Last6Q_Revenue_Margin_PCT','Last6Q_Income_Margin_PCT','max_report_date','last_filing_date','last_earnings_date','next_earnings_date','stock_price_update_datetime',
         'Revenue_Growth_Slope','Revenue_R2','Revenue_Growth_PCT','Revenue_Avg_Residual_Last3','Revenue_Growth_N','Revenue_Growth_Outlier_PCT','Revenue_Growth_Median',
         'Income_Growth_Slope','Income_R2','Income_Growth_PCT','Income_Avg_Residual_Last3','Income_Growth_N','Income_Growth_Outlier_PCT',
         'Margin_Growth_Slope','Margin_R2','Margin_Avg_Residual_Last3','Margin_Growth_N','Margin_Growth_N_Outliers']
@@ -2714,6 +2730,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 "Last6Q_Revenue_Margin_PCT": st.column_config.NumberColumn(label="Last 6Q Revenue Median", format='dollar',step='int'),
                 "Last6Q_Income_Margin_PCT": st.column_config.NumberColumn(label="Last 6Q Income Median", format='dollar',step='int'),
                 "last_filing_date": st.column_config.DateColumn(),
+                "max_report_date": st.column_config.DateColumn(),
                 "last_earnings_date": st.column_config.DateColumn(),
                 "next_earnings_date": st.column_config.DateColumn(),
                 "stock_price_update_datetime": st.column_config.DatetimeColumn(label="Price Update Time",format="MMM DD, hh:mm A",timezone="US/Pacific" ),

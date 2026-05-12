@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from icecream import ic
 # from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 # from dateutil.relativedelta import relativedelta
 from collections import OrderedDict
 import json
@@ -12,6 +12,7 @@ import datetime as dt
 import logging
 from typing import Iterable, List, Dict, Tuple, Optional
 from io import StringIO
+from edgar_nrt_sec_load import edgar_get_latest_10q_10k_facts
 
 ss = st.session_state
 USER_AGENT = "AI Analytics & Development (rafaelavila3@gmail.com)"
@@ -369,7 +370,7 @@ def sec_edgar_financial_load(cik):
     
     debug_flag=0 #debug
     frame_criteria='2025Q3' #debug '2024Q4' is an example
-    metric_criteria='Assets' # 'Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
+    metric_criteria='RevenueFromContractWithCustomerExcludingAssessedTax' # 'RevenueFromContractsWithCustomers','Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
     metrics_df=pd.DataFrame()
 
     # cik = '0000732717' #936528 1050446 1821806
@@ -466,7 +467,17 @@ def sec_edgar_financial_load(cik):
 
             filings_df=filings_df[['cik','company_name','primary_ticker','primary_exchange','sic','sicDescription','fiscalYearEnd','accessionNumber','filingDate','reportDate','form','primaryDocument','fileNumber']]
             # filings_10q_10k_df = filings_df[filings_df['form'].isin(['10-Q', '10-K'])]
-            # max_filing_date = filings_10q_10k_df['filingDate'].max()
+            filings_df['filingDate'] = pd.to_datetime(filings_df['filingDate'])
+            
+            latest_row = (
+                filings_df[filings_df['form'].isin(['10-Q', '10-K'])]
+                .sort_values('filingDate', ascending=False)
+                .iloc[0]
+            )
+
+            max_filing_10q_10k_date = latest_row['filingDate']
+            latest_accn = latest_row['accessionNumber']
+            
             # max_report_date = filings_10q_10k_df['reportDate'].max()
             # st.write(f"Filings DataFrame for filings_10q_10k_df: ",filings_10q_10k_df) # debug
 
@@ -518,12 +529,34 @@ def sec_edgar_financial_load(cik):
                 data = response.json()
 
                 facts = data.get("facts", {})
+                
+                companyfacts_accns = set()
+                for taxonomy, taxonomy_data in facts.items():   # us-gaap, ifrs-full, dei, etc.
+                    for metric, metric_data in taxonomy_data.items():
+                        units_dict = metric_data.get("units", {})
+                        for unit, records in units_dict.items():
+                            for rec in records:
+                                accn = rec.get("accn")
+                                if accn:
+                                    companyfacts_accns.add(accn)
+
+                def apply_decimals(val, decimals):
+                    if decimals is None:
+                        return val
+                    try:
+                        d = int(decimals)
+                        return val * (10 ** d)
+                    except:
+                        return val
+
+
                 rows = []
 
                 for taxonomy, taxonomy_data in facts.items():   # e.g., "us-gaap", "ifrs-full", "dei"
                     if taxonomy not in ("us-gaap", "ifrs-full"):
                         continue
 
+                    #st.write('taxonomy_data',taxonomy_data) #debug]
                     for metric, metric_data in taxonomy_data.items():
                     # for metric, metric_data in data["facts"]["us-gaap"].items():
                         units_dict = metric_data.get("units", {})
@@ -545,8 +578,43 @@ def sec_edgar_financial_load(cik):
                                         "fy": rec.get("fy"),
                                         "fp": rec.get("fp")
                                     })
+                    
+                    # st.write('max_filing_date from companyfacts_url',max_filing_date) #debug
+                    if latest_accn not in companyfacts_accns:
+                    #if max_filing_10q_10k_date < datetime.today()-timedelta(days=90):
+                        most_recent_10q_10k_dict = edgar_get_latest_10q_10k_facts(cik)
+                        nrt_facts = most_recent_10q_10k_dict.get("facts", {})
+                        # st.write('nrt_facts',nrt_facts) #debug
+
+                        for taxonomy, taxonomy_data in nrt_facts.items():   # e.g., "us-gaap", "ifrs-full", "dei"
+                            if taxonomy not in ("us-gaap", "ifrs-full"):
+                                continue
+
+                            for metric, metric_data in taxonomy_data.items():
+                                # for metric, metric_data in data["facts"]["us-gaap"].items():
+                                units_dict = metric_data.get("units", {})
+                                # st.write(units_dict) #debug
+                            
+                                for unit, records in units_dict.items():
+                                    for rec in records:
+                                            rows.append({
+                                                "taxonomy": taxonomy,
+                                                "metric_label": metric,
+                                                "filed": rec.get("filed"),
+                                                "unit": unit,
+                                                "start": rec.get("start"),
+                                                "end": rec.get("end"),
+                                                "frame": rec.get("frame"),
+                                                "val": rec.get("val"),
+                                                "accn": rec.get("accn"),
+                                                "form": rec.get("form"),
+                                                "fy": rec.get("fy"),
+                                                "fp": rec.get("fp")
+                                            })
+                                            # st.write('row added from nrt_facts',rows[-1]) #debug
 
                     metrics_df = pd.DataFrame(rows)
+                    # st.write('initial metrics_df',metrics_df) #debug
                     
                     # Normalize types
                     metrics_df["start"] = pd.to_datetime(metrics_df["start"], errors="coerce")
