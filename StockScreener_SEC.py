@@ -1556,6 +1556,7 @@ def write_sec_data_into_db(load_type):
         try:
             # st.write(f"Loading SEC data for CIK: {cik}...")  # debug
             company_and_ticker = ss.company_lookup_df[ss.company_lookup_df['cik'] == cik]['company_and_ticker'].iloc[0] if not ss.company_lookup_df[ss.company_lookup_df['cik'] == cik].empty else cik
+            # st.write(f"company_and_ticker = {company_and_ticker}") #debug
             status.write(f"Processing CIK {cik} ({i+1}/{total}), {error/i*100 if i > 0 else 0:.1f}% errors so far")
             res = sec_edgar_financial_load(cik)
             
@@ -1576,11 +1577,13 @@ def write_sec_data_into_db(load_type):
             col = ss.quarterly_financials.pop('company_and_ticker')
             ss.quarterly_financials.insert(0, 'company_and_ticker', col)
             filings_10q_10k_df = ss.filings_df[ss.filings_df['form'].isin(['10-Q', '10-K'])]
+            filings_10q_10k_df['reportDate'] = pd.to_datetime(filings_10q_10k_df['reportDate'], errors='coerce')
             # st.dataframe(filings_10q_10k_df)  # debug
+            # st.stop()
             last_filing_date= filings_10q_10k_df['filingDate'].max() if not filings_10q_10k_df.empty else None
             max_report_date = filings_10q_10k_df['reportDate'].max().date() if not filings_10q_10k_df.empty else None
             ss.quarterly_financials['last_filing_date'] = last_filing_date.date() if pd.notna(last_filing_date) else None
-            ss.quarterly_financials['max_report_date'] = max_report_date.date() if pd.notna(max_report_date) else None
+            ss.quarterly_financials['max_report_date'] = max_report_date if pd.notna(max_report_date) else None
 
             # If quarterly data isn't present, surface a message and stop further processing
             if not isinstance(ss.quarterly_financials, pd.DataFrame) or ss.quarterly_financials.empty:
@@ -1607,8 +1610,13 @@ def write_sec_data_into_db(load_type):
             postgres_update_bulk(df_pg, 'stock_quarterly_financials_sec', primary_key_columns=primary_key_columns)  # Save quarterly data with metrics to PostgreSQL
         except Exception as e:
             error=error+1
-            st.write(f"Failed to load and write SEC data for {company_and_ticker}: {e}")
-            logging.error(f"Failed to load and write SEC data for {company_and_ticker}: {e}")
+            exc_type, exc_obj, tb = sys.exc_info()
+            filename = tb.tb_frame.f_code.co_filename
+            line_no = tb.tb_lineno
+            code_line = linecache.getline(filename, line_no).strip()
+            st.warning(f"Failed to load and write SEC data for {company_and_ticker} due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
+            logging.error(f"Failed to load and write SEC data for {company_and_ticker} due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
+            # st.stop() #debug
             ss.filings_df = pd.DataFrame()
             ss.quarterly_financials = pd.DataFrame()
             ss.annual_financials = pd.DataFrame()
