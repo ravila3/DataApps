@@ -1230,31 +1230,24 @@ def rank_companies_by_growth_and_update_DB(cik_list):
     
     st.toast('Read SEC Quarterly Financial Data from DB')
 
-    # st.write(ss.quarterly_financials) # debug
+    # st.write("ss.quarterly_financials", ss.quarterly_financials) #debug
     
     for i, cik in enumerate(cik_list): # :#companies_dict.items():
         try: 
             progress_bar.progress((i+1) / total)
             ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'ticker'].iloc[0])
+            company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
             last_sec_update_datetime = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'last_modified'].max()
             last_filing_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'last_filing_date'].max()
             max_report_date = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'max_report_date'].max()
-            company_and_ticker = (ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik, 'company_and_ticker'].iloc[0])
+            last_filing_date_rankings_df = ss.rankings_df.loc[ss.rankings_df['cik'] == cik, 'last_filing_date'].max()
+            # st.write(f"last_filing_date_rankings_df = {last_filing_date_rankings_df}") #debug
             last_regression_update_datetime = ss.rankings_df.loc[ss.rankings_df['cik'] == cik, 'regression_update_datetime'].max()
             status.write(f"Processing CIK {cik} ({i+1}/{total}, {safe_round(safe_multiply(safe_divide(total_updated+1,i+1),100),1)}% success writing updates to DB)")
             results_for_cik=update_yahoo_data_for_company(cik)
-            # last_filing_ts = pd.to_datetime(last_filing_date, utc=True, errors='coerce')
-            # last_reg_ts = pd.to_datetime(last_regression_update_datetime, utc=True, errors='coerce').floor('s') - pd.Timedelta(hours=24)
-            # last_sec_ts = pd.to_datetime(last_sec_update_datetime, utc=True, errors='coerce').floor('s')
-            # st.write(f"{company_and_ticker}: last_regression_update_datetime={last_reg_ts.date()}, last_sec_update_datetime={last_sec_ts.date()}, last_filing_date={last_filing_date}")
-            # if pd.isna(last_reg_ts) or last_reg_ts<=last_sec_ts or last_filing_ts<(pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=90)):
-            #     # print('processing regression')
-            #     st.write(f"{company_and_ticker}: last_regression_update_datetime={last_reg_ts.date()}, last_sec_update_datetime={last_sec_ts.date()}, last_filing_date={last_filing_date}")
-            #     df_for_cik = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik]
-            #     analyze_yoy_growth(df_for_cik,company_and_ticker,plot_regression_bin=0)
-
-            last_filing_ts = pd.to_datetime(last_filing_date, utc=True, errors='coerce')
-            last_reg_ts = pd.to_datetime(last_regression_update_datetime, utc=True, errors='coerce')
+            # st.write(f"results_for_cik: {results_for_cik}") #debug
+            last_filing_ts = last_filing_date
+            last_reg_ts = last_regression_update_datetime
             if pd.notna(last_reg_ts):
                 last_reg_ts = last_reg_ts.floor('s') #- pd.Timedelta(hours=24)
             last_sec_ts = pd.to_datetime(last_sec_update_datetime, utc=True, errors='coerce')
@@ -1273,13 +1266,13 @@ def rank_companies_by_growth_and_update_DB(cik_list):
             # )
 
             # threshold for stale filings
-            threshold_90 = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=90)
+            threshold_90 = pd.Timestamp.now() - pd.Timedelta(days=90)
 
             # decide stale_filing: True if missing OR older than 90 days
             stale_filing = pd.isna(last_filing_ts) or (last_filing_ts < threshold_90)
 
             # decide to run: if no last_reg, or last_reg is older-or-equal than last_sec, or filing is stale
-            need_regression = pd.isna(last_reg_ts) or (
+            need_regression = pd.isna(last_reg_ts) or pd.isna(last_filing_date_rankings_df) or (
                 pd.notna(last_sec_ts) and last_reg_ts <= last_sec_ts
             ) or stale_filing
 
@@ -1290,6 +1283,7 @@ def rank_companies_by_growth_and_update_DB(cik_list):
                         f"{' stale filing' if stale_filing else ''})")
                 df_for_cik = ss.quarterly_financials.loc[ss.quarterly_financials['cik'] == cik]
                 # st.write(f"df_for_cik",df_for_cik) #debug
+                # st.stop()
                 analyze_yoy_growth(df_for_cik, company_and_ticker, plot_regression_bin=0)
 
             # st.write("results",results) #debug
@@ -1584,9 +1578,9 @@ def write_sec_data_into_db(load_type):
             filings_10q_10k_df = ss.filings_df[ss.filings_df['form'].isin(['10-Q', '10-K'])]
             # st.dataframe(filings_10q_10k_df)  # debug
             last_filing_date= filings_10q_10k_df['filingDate'].max() if not filings_10q_10k_df.empty else None
-            max_report_date = filings_10q_10k_df['reportDate'].max() if not filings_10q_10k_df.empty else None
-            ss.quarterly_financials['last_filing_date'] = last_filing_date
-            ss.quarterly_financials['max_report_date'] = max_report_date
+            max_report_date = filings_10q_10k_df['reportDate'].max().date() if not filings_10q_10k_df.empty else None
+            ss.quarterly_financials['last_filing_date'] = last_filing_date.date() if pd.notna(last_filing_date) else None
+            ss.quarterly_financials['max_report_date'] = max_report_date.date() if pd.notna(max_report_date) else None
 
             # If quarterly data isn't present, surface a message and stop further processing
             if not isinstance(ss.quarterly_financials, pd.DataFrame) or ss.quarterly_financials.empty:
@@ -1635,6 +1629,27 @@ def load_quarterly_sec_data_from_db():
     column_specs=get_column_specs_quarterly_df()
     pg_to_pretty = {v["pg_name"]: k for k, v in column_specs.items()}
     df_pretty=df.rename(columns={pg_col: pg_to_pretty.get(pg_col, pg_col) for pg_col in df.columns})
+    
+    col = df_pretty['last_filing_date']
+
+    mask_str = col.apply(lambda x: isinstance(x, str))
+    mask_date10 = mask_str & col.str.len().eq(10)
+    mask_ts = mask_str & col.str.len().gt(10)
+
+    # Convert YYYY-MM-DD
+    df_pretty.loc[mask_date10, 'last_filing_date'] = pd.to_datetime(
+        col[mask_date10],
+        format='%Y-%m-%d',
+        errors='coerce'
+    )
+
+    # Convert timestamps
+    df_pretty.loc[mask_ts, 'last_filing_date'] = pd.to_datetime(
+        col[mask_ts],
+        errors='coerce',
+        infer_datetime_format=True
+    )
+    
     return df_pretty #, companies_data
 
 def load_stock_growth_analysis_data_from_db():
@@ -2505,13 +2520,13 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         
         today = datetime.now().date()
         if ss.filter_min_last_filing_date is not None and ss.filter_min_last_filing_date <= today:
-            ss.editable_stock_growth_analysis_df['last_filing_date'] = pd.to_datetime(
-                    ss.editable_stock_growth_analysis_df['last_filing_date'],
-                    errors='coerce')    
-            selected_date = ss.filter_min_last_filing_date
-            if isinstance(selected_date, (list, tuple)):
-                selected_date = selected_date[0] if len(selected_date) > 0 else None
-            mask &= (ss.editable_stock_growth_analysis_df['last_filing_date'] >= pd.to_datetime(ss.filter_min_last_filing_date))
+            # ss.editable_stock_growth_analysis_df['last_filing_date'] = pd.to_datetime(
+            #         ss.editable_stock_growth_analysis_df['last_filing_date'],format="%Y-%m-%d", errors='coerce')    
+            selected_datetime = pd.to_datetime(ss.filter_min_last_filing_date)
+            # st.write("selected_datetime",selected_datetime) #debug
+            if isinstance(selected_datetime, (list, tuple)):
+                selected_datetime = selected_datetime[0] if len(selected_datetime) > 0 else None
+            mask &= (ss.editable_stock_growth_analysis_df['last_filing_date'] >= selected_datetime)
     
     sort_columns=['Consolidated_Score','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago', 'industry', 'sector',
         'Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
@@ -2526,7 +2541,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         st.write()
         column_include_regression = st.toggle("Include Regression Fields (may slow performance on large datasets)", value=False,key='column_include_regression')
     with col3:
-        sub_col1, sub_col2 = st.columns([3,1.2],gap="small")
+        sub_col1, sub_col2 = st.columns([3,1.2], gap="small")
         with sub_col1:
             sort_column = st.selectbox("Sort Options", options=sort_columns, key='temp_sort_column', on_change=update_primary_filter_session_value, args=("sort_column",))
         with sub_col2:
@@ -2729,7 +2744,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 "Last3Q_Median_Margin_PCT": st.column_config.NumberColumn(label="Last 3Q Median Margin %", format='%,.1f'),
                 "Last6Q_Revenue_Margin_PCT": st.column_config.NumberColumn(label="Last 6Q Revenue Median", format='dollar',step='int'),
                 "Last6Q_Income_Margin_PCT": st.column_config.NumberColumn(label="Last 6Q Income Median", format='dollar',step='int'),
-                "last_filing_date": st.column_config.DateColumn(),
+                "last_filing_date": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
                 "max_report_date": st.column_config.DateColumn(),
                 "last_earnings_date": st.column_config.DateColumn(),
                 "next_earnings_date": st.column_config.DateColumn(),
