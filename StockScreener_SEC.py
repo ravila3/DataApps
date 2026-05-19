@@ -1504,15 +1504,18 @@ def write_sec_data_into_db(load_type):
         cutoff_recent_future = (datetime.now() + timedelta(days=7)).date()
 
         old_reports_df = stock_growth_analysis_df.loc[
+            # last fiscal quarter too long ago and last filing date should have passed
             ((stock_growth_analysis_df['max_report_date'] < cutoff_old) &
             (stock_growth_analysis_df['max_report_date'] > (cutoff_old - timedelta(days=90))) &
             (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60)) &
             (stock_growth_analysis_df['next_earnings_date'] > cutoff_future)) |
             (
+            # no next earnings date and last filing date older than 60 days
             (
                 (stock_growth_analysis_df['next_earnings_date'].isna()) &
                 (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60))
             ) |
+            # last earnings date around current day and last filing date older than 7 days
             (
                 (stock_growth_analysis_df['last_earnings_date'] > cutoff_recent_past) &
                 (stock_growth_analysis_df['last_earnings_date'] < cutoff_recent_future) &
