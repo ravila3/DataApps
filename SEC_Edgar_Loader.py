@@ -653,11 +653,11 @@ def sec_edgar_financial_load(cik):
                     
                     end_date_totals["end"] = pd.to_datetime(end_date_totals["end"], errors="coerce")
                     
-                    # if debug_flag==1:
-                    #     st.write('initial end_date_totals',end_date_totals) #debug
+                    if debug_flag==1:
+                        st.write('initial end_date_totals',end_date_totals) #debug
                     
                     threshold = end_date_totals["total_rows"].quantile(0.05)
-                    end_date_totals = end_date_totals[end_date_totals['total_rows']>=threshold-15]        
+                    end_date_totals = end_date_totals[end_date_totals['total_rows']>=threshold-25]        
                     full_year_frames = end_date_totals["frame_min"].dropna().astype(str)
                     full_year_frames = full_year_frames[full_year_frames.str.len() == 6]
                     first_full_year_frame=full_year_frames.min()
@@ -776,8 +776,7 @@ def sec_edgar_financial_load(cik):
                     
                     metrics_df["frame"] = metrics_df["end"].map(end_to_corrected)
                     metrics_df = metrics_df[metrics_df['frame'].notna()]
-                    # st.write('metrics_df after cleanup', metrics_df) #debug
-
+                    
                     if debug_flag==1:
                         st.write('Initial SEC EDGAR dataframe',metrics_df) #debug
 
