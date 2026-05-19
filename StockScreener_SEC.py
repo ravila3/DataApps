@@ -1500,14 +1500,24 @@ def write_sec_data_into_db(load_type):
 
         cutoff_old = datetime.now() - timedelta(days=90)
         cutoff_future = datetime.now() + timedelta(days=30)
+        cutoff_recent_past = (datetime.now() - timedelta(days=7)).date()
+        cutoff_recent_future = (datetime.now() + timedelta(days=7)).date()
 
         old_reports_df = stock_growth_analysis_df.loc[
-            (stock_growth_analysis_df['max_report_date'] < cutoff_old) &
+            ((stock_growth_analysis_df['max_report_date'] < cutoff_old) &
             (stock_growth_analysis_df['max_report_date'] > (cutoff_old - timedelta(days=90))) &
             (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60)) &
+            (stock_growth_analysis_df['next_earnings_date'] > cutoff_future)) |
             (
-            (stock_growth_analysis_df['next_earnings_date'] > cutoff_future) |
-            (stock_growth_analysis_df['next_earnings_date'].isna())
+            (
+                (stock_growth_analysis_df['next_earnings_date'].isna()) &
+                (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60))
+            ) |
+            (
+                (stock_growth_analysis_df['last_earnings_date'] > cutoff_recent_past) &
+                (stock_growth_analysis_df['last_earnings_date'] < cutoff_recent_future) &
+                (stock_growth_analysis_df['last_filing_date'] < pd.to_datetime(cutoff_recent_past))
+            )
             )
             ,['cik','company_and_ticker','last_filing_date','max_report_date','last_earnings_date','next_earnings_date']
         ]
