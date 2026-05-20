@@ -855,7 +855,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         st.write(error_text)
         print(error_text)
         logging.error(error_text) #debug
-    print(f"at end of analyze_yoy_growth function, len(ss.rankings_df)={len(ss.rankings_df)}")
+    print(f"at end of analyze_yoy_growth function")
     # st.write(metrics) #debug
     # st.stop() #debug
     return metrics
@@ -1924,6 +1924,8 @@ def quantile_color(s):
     return s.apply(color)
 
 def show_regression_charts(cik):
+    
+    print('entering show_regression_charts function')
     try: 
         quarterly_df=postgres_read('stock_quarterly_financials_sec',f"cik='{cik}'")
         company_and_ticker=quarterly_df['company_and_ticker'].iloc[0]
@@ -1944,6 +1946,7 @@ def show_regression_charts(cik):
         code_line = linecache.getline(filename, line_no).strip()
         st.warning(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
         # st.warning(f"Regression failed: {e}")
+    print('exiting show_regression_charts function')
     return()
 
 def update_primary_filter_session_value(key):
