@@ -19,3 +19,4 @@ black
 flake8
 ipykernel
 jupyter
+pywinpty==3.0.3
