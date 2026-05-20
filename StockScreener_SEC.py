@@ -1498,6 +1498,8 @@ def write_sec_data_into_db(load_type):
         st.write('SEC Filings to Load',filtered_sec_filings)
         cik_list=filtered_sec_filings['cik'].to_list()
 
+        # Now that we have the daily filings that are newer, let's also find other companies that haven't had filings lately
+        # in case that we missed some
         cutoff_old = datetime.now() - timedelta(days=90)
         cutoff_future = datetime.now() + timedelta(days=30)
         cutoff_recent_past = (datetime.now() - timedelta(days=7)).date()
@@ -1526,6 +1528,7 @@ def write_sec_data_into_db(load_type):
         ]
         st.write('Companies with old reporting dates (potentially stale data)',old_reports_df)
         cik_list = list(set(cik_list + old_reports_df['cik'].tolist()))
+        # cik_list = ['0000796343'] #debug to focus on just one stock update
 
         # Now get list of companies that Yahoo says will have earnings reported (to get timely data instead of next day)
 #        df = stock_growth_analysis_df.copy()
