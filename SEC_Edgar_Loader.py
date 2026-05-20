@@ -1027,7 +1027,7 @@ def sec_edgar_financial_load(cik):
     pivoted_annual_df['end_date']=pd.to_datetime(pivoted_annual_df["end_date"], errors="coerce")
     # pivoted_annual_df['start_date']=pd.to_datetime(pivoted_annual_df["start_date"], errors="coerce")
 
-    return filings_df, pivoted_qtr_df, pivoted_annual_df
+    return filings_df, pivoted_qtr_df, pivoted_annual_df, ss.income_statement_columns_for_chart
 
 def load_daily_SEC_submission_index(first_date: dt.date, forms_filter_list) -> pd.DataFrame:
     """

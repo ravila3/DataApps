@@ -1578,14 +1578,15 @@ def write_sec_data_into_db(load_type):
             
             progress_bar.progress((i + 1) / total)
             # st.write(res)  # debug
-            if not isinstance(res, (list, tuple)) or len(res) != 3:
+            if not isinstance(res, (list, tuple)) or len(res) != 4:
                 print("Unexpected return from sec_edgar_financial_load; expected (filings_df, quarterly_df, annual_df).")
                 ss.filings_df = pd.DataFrame()
                 ss.quarterly_financials = pd.DataFrame()
                 ss.annual_financials = pd.DataFrame()
+                ss.income_statement_columns_for_chart = []
                 st.stop()
                 
-            ss.filings_df, ss.quarterly_financials, ss.annual_financials = res
+            ss.filings_df, ss.quarterly_financials, ss.annual_financials, ss.income_statement_columns_for_chart = res
             ss.quarterly_financials = ss.quarterly_financials.merge(
                 ss.company_lookup_df[['cik', 'ticker','company_and_ticker']],
                 on='cik',

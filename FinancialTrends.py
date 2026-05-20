@@ -488,13 +488,14 @@ def main():
         # Load SEC EDGAR financials for the selected CIK (guarded)
         try:
             res = sec_edgar_financial_load(ss.cik)
-            if not isinstance(res, (list, tuple)) or len(res) != 3:
+            if not isinstance(res, (list, tuple)) or len(res) != 4:
                 st.error("Unexpected return from sec_edgar_financial_load; expected (filings_df, quarterly_df, annual_df).")
                 ss.filings_df = pd.DataFrame()
                 ss.quarterly_financials = pd.DataFrame()
                 ss.annual_financials = pd.DataFrame()
+                ss.income_statement_columns_for_chart=[]
                 st.stop()
-            ss.filings_df, ss.quarterly_financials, ss.annual_financials = res
+            ss.filings_df, ss.quarterly_financials, ss.annual_financials, ss.income_statement_columns_for_chart = res
 
             # If quarterly data isn't present, surface a message and stop further processing
             if not isinstance(ss.quarterly_financials, pd.DataFrame) or ss.quarterly_financials.empty:
@@ -517,6 +518,7 @@ def main():
 
         # st.write(f"income_statement_columns_for_chart just prior to melt: {ss.income_statement_columns_for_chart}") #debug
         # st.write('ss.quarterlyfinancials just prior to melt',ss.quarterly_financials) #debug
+        # st.write("ss.income_statement_columns_for_chart",ss.income_statement_columns_for_chart) #debug
         chart_df = ss.quarterly_financials[['end_date'] + ss.income_statement_columns_for_chart].melt(id_vars=['end_date'], var_name='metric', value_name='value')
         chart_df = chart_df[pd.notna(chart_df['value'])]
 
