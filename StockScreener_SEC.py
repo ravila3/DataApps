@@ -159,13 +159,17 @@ def reset_forms_ss_vars():
     ss.apply_scores_done=False
     return
 
-def safe_divide(x, n=1):
+def safe_divide(a, b=1):
     try:
-        answer=x/n
-    except Exception as e:
-        answer=None
-        print(f"Division failed due to {e}")
-    return answer
+        if a is None or b is None:
+            return 0.0
+        if pd.isna(a) or pd.isna(b):
+            return 0.0
+        if b == 0:
+            return 0.0
+        return float(a) / float(b)
+    except:
+        return 0.0
 
 def clean_number(x):
     # Reject None
@@ -1515,6 +1519,7 @@ def write_sec_data_into_db(load_type):
             # no next earnings date and last filing date older than 60 days
             (
                 (stock_growth_analysis_df['next_earnings_date'].isna()) &
+                (stock_growth_analysis_df['last_filing_date'] > datetime.now() - timedelta(days=150)) &
                 (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60))
             ) |
             # last earnings date around current day and last filing date older than 7 days
@@ -1961,6 +1966,12 @@ def show_investment_returns():
     print("entering into show_investment_returns function")
     transactions_df=load_stock_transactions_from_db()
     ss.rankings_df =load_stock_growth_analysis_data_from_db()
+    
+    # with st.expander("Expand to show filters", key="temp_filters_expanded", on_change=update_primary_filter_session_value, args=("filters_expanded",)):
+        # col1, col2 = st.columns(2)
+        # with col1:
+        #     start_date = st.date_input("Start Date", key='temp_filter_start_date', on_change=update_primary_filter_session_value, args=("filter_start_date",))
+    
     transaction_profit_df = transactions_df.merge(
         ss.rankings_df[['cik', 'ticker', 'stock_price']], on='cik', how='left'
         ).rename(columns={'stock_price': 'current_price'})
@@ -2045,6 +2056,41 @@ def show_investment_returns():
 
     # Ensure date is Timestamp
     investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
+    today = pd.Timestamp.today()
+
+    # Ensure date is Timestamp
+    investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
+
+    # Months held
+    investment_returns_df['months_held'] = (
+        (today - investment_returns_df['first_purchase_date']).dt.days // 30
+    )
+
+    # Holding period buckets
+    bins = [-1, 3, 6, 12, 24, 36, 48, 60, float('inf')]
+    labels = [
+        'a) 0–3 months',
+        'b) 4–6 months',
+        'c) 7–12 months',
+        'd) 1 year',
+        'e) 2 years',
+        'f) 3 years',
+        'g) 4 years',
+        'h) 5+ years'
+    ]
+
+    investment_returns_df['holding_period_group'] = pd.cut(
+        investment_returns_df['months_held'],
+        bins=bins,
+        labels=labels,
+        right=True
+    )
+
+    investment_returns_df['holding_period_group'] = pd.Categorical(
+        investment_returns_df['holding_period_group'],
+        categories=labels,
+        ordered=True
+    )
 
     investment_returns_df['months_held'] = (
         round((today - investment_returns_df['first_purchase_date']).dt.days / 30,1)
@@ -2055,6 +2101,51 @@ def show_investment_returns():
     
     # Clean up infinite or invalid values
     investment_returns_df = investment_returns_df.replace([np.inf, -np.inf], np.nan)
+    
+    # --- GROUPED TOTALS BY HOLDING PERIOD ---
+    def investment_returns_by_slice(investment_returns_df, var_group_by):
+        grouped_totals_df = (
+            investment_returns_df
+                .groupby(var_group_by, dropna=False)
+                .agg({
+                    'purchase_amount': 'sum',
+                    'current_holdings_value': 'sum',
+                    'total_gains': 'sum',
+                    'realized_gains': 'sum',
+                    'unrealized_gains': 'sum',
+                    'purchase_quantity': 'sum',
+                    'current_holdings': 'sum'
+                })
+                .reset_index()
+        )
+    
+        # Total return (current value vs cost basis)
+        grouped_totals_df['total_return_pct'] = (grouped_totals_df['total_gains'] /
+                grouped_totals_df['purchase_amount']).replace([np.inf, -np.inf], 0).fillna(0) * 100
+        grouped_totals_df.insert(4, 'total_return_pct', grouped_totals_df.pop('total_return_pct'))
+        # holding_period_totals['total_return_pct'] = safe_divide(holding_period_totals['total_gains'],holding_period_totals['purchase_amount']) * 100
+        # st.write('holding_period_totals = ',holding_period_totals) # debug
+
+        # Preserve your intended order if using categoricals
+        if isinstance(grouped_totals_df[var_group_by].dtype, pd.CategoricalDtype):
+            grouped_totals_df[var_group_by] = pd.Categorical(
+                grouped_totals_df[var_group_by],
+                categories=investment_returns_df[var_group_by].cat.categories,
+                ordered=True
+            )
+
+        grouped_totals_df = grouped_totals_df.sort_values('purchase_amount', ascending=False)
+        
+        return grouped_totals_df
+    
+    holding_period_totals = investment_returns_by_slice(investment_returns_df, 'holding_period_group')
+    holding_period_totals = holding_period_totals.sort_values('holding_period_group')
+    
+    investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
+    sector_totals = investment_returns_by_slice(investment_returns_df, 'sector')
+
+    investment_returns_df['industry'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
+    industry_totals = investment_returns_by_slice(investment_returns_df, 'industry')
 
     # --- ADD TOTALS ROW ---
 
@@ -2139,7 +2230,7 @@ def show_investment_returns():
 
     total_mask = investment_returns_df["company_and_ticker"] == "TOTAL"
 
-    fields_to_blank_totals = ["first_purchase_date","months_held","avg_purchase_price","avg_sold_price","current_price","purchase_quantity"
+    fields_to_blank_totals = ["ticker","first_purchase_date","months_held","avg_purchase_price","avg_sold_price","current_price","purchase_quantity"
                               ,"sold_quantity","current_holdings"]
 
     for col in fields_to_blank_totals:
@@ -2155,7 +2246,10 @@ def show_investment_returns():
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
-    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount','current_holdings','current_holdings_value','total_gains','total_return_pct','realized_gains','unrealized_gains','months_held','purchase_quantity','first_purchase_date','avg_purchase_price','current_price']]
+    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
+                                                   ,'current_holdings','current_holdings_value','total_gains','total_return_pct'
+                                                   ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
+                                                   ,'first_purchase_date','avg_purchase_price','current_price']]
 
     def highlight_total_row(row):
         if row["company_and_ticker"] == "TOTAL":
@@ -2177,6 +2271,33 @@ def show_investment_returns():
                  },
                  )
     st.write("")
+
+    # Show totals by holding period group
+    holding_period_totals_styled = (
+        holding_period_totals.style
+            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .format(fmt)
+    )
+    st.write("### Totals by Holding Period Group")
+    st.dataframe(holding_period_totals_styled, use_container_width=True)
+
+    # Show totals by sector
+    sector_totals_styled = (
+        sector_totals.style
+            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .format(fmt)
+    )
+    st.write("### Totals by Sector")
+    st.dataframe(sector_totals_styled, use_container_width=True)
+
+    # Show totals by industry
+    industry_totals_styled = (
+        industry_totals.style
+            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .format(fmt)
+    )
+    st.write("### Totals by Industry")
+    st.dataframe(industry_totals_styled, use_container_width=True)
 
     ########################################################################################
     # 1. Define the callback to handle database sync
@@ -2201,10 +2322,17 @@ def show_investment_returns():
             # Get the original row and update it with the new values
             row = ss.transaction_df.iloc[row_idx].copy()
             for col, val in updated_values.items():
+                if [col] in [['company_and_ticker']]:
+                    continue # skip updating company_and_ticker since it's not an editable field and we don't want to accidentally overwrite it
                 row[col] = val
-            
-            postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",
-                            primary_key_columns=["cik", "date", "action"])
+                if col in ['quantity', 'price']:
+                    row['total'] = row['quantity'] * row['price']  # Recalculate total if quantity or price changed
+                if col == 'total':
+                    row['price'] = row['total'] / row['quantity'] if row['quantity'] != 0 else 0  # Recalculate price if total changed
+                row['last_modified'] = pd.Timestamp.now()  # Update last modified timestamp
+                ss.transaction_df.iloc[row_idx] = row  # Update the session state with the modified row
+            #st.toast(f"Updated row {row_idx} with values: {row.to_dict()}") # debug            
+            postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",primary_key_columns=["cik", "date", "action"])
             st.toast(f"Updated row {row_idx}")
 
     # 2. Render the Editor
