@@ -112,6 +112,7 @@ if "quarterly_financials" not in ss:
     ss.filter_sector = None
     ss.filter_inv_sector = None
     ss.filter_inv_industry = None
+    ss.holding_period_group = None
     ss.sort_column = 'Consolidated_Score'
     ss.sort_direction = 'Desc'
     ss.compute_value_score=False
@@ -1994,17 +1995,6 @@ def show_investment_returns():
                 )
     industry_list=industry_df['industry'].tolist()
     
-    col1, col2 = st.columns(2)
-    with col1:
-        sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
-    with col2:
-        industry = st.selectbox("Filter by Industry", options=["All"] + industry_list, key='temp_filter_inv_industry', on_change=update_primary_filter_session_value, args=("filter_inv_industry",))
-    
-    if sector != "All":
-        transaction_profit_df = transaction_profit_df[transaction_profit_df['sector'] == sector]
-    if industry != "All":
-        transaction_profit_df = transaction_profit_df[transaction_profit_df['industry'] == industry]
-
     # --- Build investment_returns_df from transactions_df and rankings_df ---
 
     # Split buys and sells
@@ -2136,6 +2126,20 @@ def show_investment_returns():
     investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
     investment_returns_df['industry'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
     
+    col1, col2 = st.columns(2)
+    with col1:
+        sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
+        holding_period_group = st.selectbox("Filter by Holding Period", options=["All"] + investment_returns_df['holding_period_group'].cat.categories.tolist(), key='temp_filter_holding_period_group', on_change=update_primary_filter_session_value, args=("filter_holding_period_group",))
+    with col2:
+        industry = st.selectbox("Filter by Industry", options=["All"] + industry_list, key='temp_filter_inv_industry', on_change=update_primary_filter_session_value, args=("filter_inv_industry",))
+    
+    if sector != "All":
+        investment_returns_df = investment_returns_df[investment_returns_df['sector'] == ss.temp_filter_inv_sector]
+    if industry != "All":
+        investment_returns_df = investment_returns_df[investment_returns_df['industry'] == ss.temp_filter_inv_industry]
+    if holding_period_group != "All":
+        investment_returns_df = investment_returns_df[investment_returns_df['holding_period_group'] == ss.temp_filter_holding_period_group]
+
     # --- GROUPED TOTALS BY HOLDING PERIOD ---
     def investment_returns_by_slice(investment_returns_df, var_group_by):
         grouped_totals_df = (
