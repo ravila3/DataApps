@@ -110,6 +110,8 @@ if "quarterly_financials" not in ss:
     ss.filter_company_and_ticker = None
     ss.filter_industry = None
     ss.filter_sector = None
+    ss.filter_inv_sector = None
+    ss.filter_inv_industry = None
     ss.sort_column = 'Consolidated_Score'
     ss.sort_direction = 'Desc'
     ss.compute_value_score=False
@@ -1954,7 +1956,7 @@ def show_regression_charts(cik):
     print('exiting show_regression_charts function')
     return()
 
-def update_primary_filter_session_value(key):
+def update_inv_primary_filter_session_value(key):
     temp_key = 'temp_'+key
     ss[key] = ss[temp_key]
     if key != 'filter_company_and_ticker':
@@ -1973,9 +1975,36 @@ def show_investment_returns():
         #     start_date = st.date_input("Start Date", key='temp_filter_start_date', on_change=update_primary_filter_session_value, args=("filter_start_date",))
     
     transaction_profit_df = transactions_df.merge(
-        ss.rankings_df[['cik', 'ticker', 'stock_price']], on='cik', how='left'
+        ss.rankings_df[['cik', 'ticker', 'stock_price','sector','industry']], on='cik', how='left'
         ).rename(columns={'stock_price': 'current_price'})
+
+    sector_df = (transaction_profit_df
+                 .groupby('sector', dropna=False)
+                 .agg({'total': 'sum'})
+                 .reset_index()
+                 .sort_values('total', ascending=False)
+                )
+    sector_list=sector_df['sector'].tolist()
+
+    industry_df = (transaction_profit_df
+                 .groupby('industry', dropna=False)
+                 .agg({'total': 'sum'})
+                 .reset_index()
+                 .sort_values('total', ascending=False)
+                )
+    industry_list=industry_df['industry'].tolist()
     
+    col1, col2 = st.columns(2)
+    with col1:
+        sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
+    with col2:
+        industry = st.selectbox("Filter by Industry", options=["All"] + industry_list, key='temp_filter_inv_industry', on_change=update_primary_filter_session_value, args=("filter_inv_industry",))
+    
+    if sector != "All":
+        transaction_profit_df = transaction_profit_df[transaction_profit_df['sector'] == sector]
+    if industry != "All":
+        transaction_profit_df = transaction_profit_df[transaction_profit_df['industry'] == industry]
+
     # --- Build investment_returns_df from transactions_df and rankings_df ---
 
     # Split buys and sells
@@ -1992,7 +2021,9 @@ def show_investment_returns():
     buy_summary = buys.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
         purchase_quantity=('purchase_quantity', 'sum'),
         purchase_amount=('purchase_amount', 'sum'),
-        first_purchase_date=('date', 'min')   # needed for returns
+        first_purchase_date=('date', 'min'), # needed for returns
+        sector=('sector', 'first'), # for filtering and analysis
+        industry=('industry', 'first') # for filtering and analysis
     ).reset_index()
 
     # Aggregate sells
@@ -2098,9 +2129,12 @@ def show_investment_returns():
     
     # Total return (current value vs cost basis)
     investment_returns_df['total_return_pct'] = (investment_returns_df['total_gains']/investment_returns_df['purchase_amount']) * 100
-    
+        
     # Clean up infinite or invalid values
     investment_returns_df = investment_returns_df.replace([np.inf, -np.inf], np.nan)
+    
+    investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
+    investment_returns_df['industry'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
     
     # --- GROUPED TOTALS BY HOLDING PERIOD ---
     def investment_returns_by_slice(investment_returns_df, var_group_by):
@@ -2249,7 +2283,7 @@ def show_investment_returns():
     investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
                                                    ,'current_holdings','current_holdings_value','total_gains','total_return_pct'
                                                    ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
-                                                   ,'first_purchase_date','avg_purchase_price','current_price']]
+                                                   ,'first_purchase_date','sector','industry','avg_purchase_price','current_price']]
 
     def highlight_total_row(row):
         if row["company_and_ticker"] == "TOTAL":
@@ -2354,7 +2388,15 @@ def show_investment_returns():
         key="my_editor",
         on_change=sync_database # This runs only when a change is committed
     )
-        
+
+def update_primary_filter_session_value(key):
+    temp_key = 'temp_'+key
+    ss[key] = ss[temp_key]
+    if key != 'filter_company_and_ticker':
+        ss.filter_company_and_ticker=ss.temp_filter_company_and_ticker=None
+    if 'sort' in key.lower():
+        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
+
 def reset_show_modal():
     ss.transaction_show_modal = False
 
