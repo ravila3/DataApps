@@ -1507,17 +1507,18 @@ def write_sec_data_into_db(load_type):
 
         # Now that we have the daily filings that are newer, let's also find other companies that haven't had filings lately
         # in case that we missed some
-        cutoff_old = datetime.now() - timedelta(days=90)
+        cutoff_90d_ago = datetime.now() - timedelta(days=90)
         cutoff_future = datetime.now() + timedelta(days=30)
         cutoff_recent_past = (datetime.now() - timedelta(days=7)).date()
         cutoff_recent_future = (datetime.now() + timedelta(days=7)).date()
 
         old_reports_df = stock_growth_analysis_df.loc[
             # last fiscal quarter too long ago and last filing date should have passed
-            ((stock_growth_analysis_df['max_report_date'] < cutoff_old) &
-            (stock_growth_analysis_df['max_report_date'] > (cutoff_old - timedelta(days=90))) &
+            ((stock_growth_analysis_df['max_report_date'] < cutoff_90d_ago) &
+            (stock_growth_analysis_df['max_report_date'] > (cutoff_90d_ago - timedelta(days=90))) &
             (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60)) &
-            (stock_growth_analysis_df['next_earnings_date'] > cutoff_future)) |
+            ((stock_growth_analysis_df['next_earnings_date'] > datetime.now() - timedelta(days=60)) 
+            )) |
             (
             # no next earnings date and last filing date older than 60 days
             (
