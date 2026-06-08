@@ -3018,20 +3018,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Kill floating tooltips 
-import streamlit.components.v1 as components
 
-# 1. Cleaned-up CSS: We remove 'pointer-events: none' from here to prevent hard-locking touch inputs
+# 1. Base structure control
 st.markdown("""
 <style>
 #vg-tooltip-element {
     opacity: 0 !important;
     transition: opacity 0.1s ease-in-out;
 }
-
 body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
     opacity: 1 !important;
 }
-
 body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
     opacity: 0 !important;
     display: none !important;
@@ -3039,51 +3036,65 @@ body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Resilient Mutation Observer and Touch Binder
+# 2. Dynamic Reset & Re-Bind Script
 components.html("""
 <script>
     const doc = window.parent.document;
+    let lastChartCount = 0;
 
-    // Core function to safely link touch events directly to the chart elements
-    function bindChartTouchEvents() {
-        const charts = doc.querySelectorAll('[data-testid="stVegaLiteChart"]');
+    function resetAndBindCharts() {
         const tooltip = doc.getElementById('vg-tooltip-element');
+        const charts = doc.querySelectorAll('[data-testid="stVegaLiteChart"]');
         
-        if (!tooltip) return;
-
-        charts.forEach(chart => {
-            // Prevent duplicate listener attachments
-            if (chart.dataset.touchBound === 'true') return;
-
-            // Force interaction rules onto the tooltip instantly when a user touches the chart
-            chart.addEventListener('touchstart', function() {
-                tooltip.style.pointerEvents = 'auto';
-                tooltip.style.display = 'block';
-            }, { passive: true });
-
-            // Ensure the tooltip is reset when the finger lifts off
-            chart.addEventListener('touchend', function() {
+        // If the number of charts changed, or a chart re-rendered, execute a clean reset
+        if (charts.length !== lastChartCount || Array.from(charts).some(c => !c.dataset.touchBound)) {
+            
+            // Hard reset the tooltip element back to its factory default state
+            if (tooltip) {
                 tooltip.style.pointerEvents = 'none';
-            }, { passive: true });
+                tooltip.style.opacity = '0';
+                tooltip.innerHTML = ''; 
+                tooltip.className = 'vg-tooltip'; // Strips out broken or stuck classes
+            }
 
-            // Mark this chart element as successfully bound
-            chart.dataset.touchBound = 'true';
-        });
+            // Bind touch triggers fresh to the visible charts
+            charts.forEach(chart => {
+                // Strip old listener reference if it existed
+                chart.removeAttribute('data-touch-bound');
+
+                chart.addEventListener('touchstart', function() {
+                    if (tooltip) {
+                        tooltip.style.pointerEvents = 'auto';
+                        tooltip.style.display = 'block';
+                    }
+                }, { passive: true });
+
+                chart.addEventListener('touchend', function() {
+                    if (tooltip) {
+                        tooltip.style.pointerEvents = 'none';
+                    }
+                }, { passive: true });
+
+                // Mark as successfully fresh-bound
+                chart.dataset.touchBound = 'true';
+            });
+
+            lastChartCount = charts.length;
+        }
     }
 
-    // Monitor the application DOM to instantly catch newly re-rendered charts
-    const observer = new MutationObserver((mutations) => {
-        bindChartTouchEvents();
+    // Monitor mutations to trigger the reset routine immediately on DOM updates
+    const observer = new MutationObserver(() => {
+        resetAndBindCharts();
     });
 
-    // Start watching your Streamlit page root layout
     observer.observe(doc.body, {
         childList: true,
         subtree: true
     });
 
-    // Run once immediately on script initialization
-    bindChartTouchEvents();
+    // Run immediately on layer mount
+    resetAndBindCharts();
 </script>
 """, height=0, width=0)
 
