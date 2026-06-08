@@ -3020,20 +3020,19 @@ st.markdown("""
 # Kill floating tooltips 
 st.markdown("""
 <style>
-/* 1. Prevent the floating element from blocking touch events or visually showing up when empty */
-#vg-tooltip-element {
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transition: opacity 0.1s ease-in-out;
-}
-
-/* 2. Make the tooltip fully visible only when a chart exists on the page and the tooltip has active text inside it */
-body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
+/* 1. When the tooltip has active metrics data injected into it, show it immediately */
+#vg-tooltip-element.vg-tooltip.visible,
+#vg-tooltip-element.vg-tooltip:not(:empty) {
+    visibility: visible !important;
     opacity: 1 !important;
+    display: block !important;
 }
 
-/* 3. If the graph toggles off, immediately force the tooltip to 0 opacity regardless of browser caching */
+/* 2. When there is no active hover data (empty) OR if the charts have unmounted entirely,
+      instantly break it down so it cannot display a ghost frame on the screen */
+#vg-tooltip-element:empty,
 body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
+    visibility: hidden !important;
     opacity: 0 !important;
     display: none !important;
 }
