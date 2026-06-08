@@ -3020,18 +3020,18 @@ st.markdown("""
 # Kill floating tooltips 
 st.markdown("""
 <style>
-/* Forces the parent app container to instantly purge hidden child layers */
-.main, .stApp, [data-testid="stMainBlockContainer"] {
-    contain: paint !important;
+/* 1. Hide the tooltip element globally by default */
+#vg-tooltip-element {
+    display: none !important;
+    opacity: 0 !important;
 }
 
-/* Hard-kills any floating tooltips sitting outside the active chart bounding boxes */
-body > #vg-tooltip-element, 
-html > #vg-tooltip-element,
-.__web-inspector-hide-shortcut__ ~ #vg-tooltip-element {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
+/* 2. Bring it back ONLY when the user is actively touching/hovering over a live chart block */
+[data-testid="stVegaLiteChart"]:hover ~ #vg-tooltip-element,
+[data-testid="stVegaLiteChart"]:active ~ #vg-tooltip-element,
+#vg-tooltip-element:hover {
+    display: block !important;
+    opacity: 1 !important;
 }
 </style>
 """, unsafe_allow_html=True)
