@@ -119,6 +119,7 @@ if "quarterly_financials" not in ss:
     ss.apply_scores_requested=False
     ss.apply_scores_done=False
     ss.compute_value_show_df = False
+    ss.user_id = None
 
 if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
@@ -1695,10 +1696,13 @@ def load_stock_growth_analysis_data_from_db():
     # df_pretty=df.rename(columns={pg_col: pg_to_pretty.get(pg_col, pg_col) for pg_col in df.columns})
     return df #, companies_data
 
-def load_stock_transactions_from_db():
+def load_stock_transactions_from_db(user_id):
     status = st.empty()
     df = postgres_read('stock_transactions')
     df = df.sort_values('date',ascending=False)
+    
+    if ss.user_id != 'All':
+        df = df[df['user_id'] == ss.user_id]
     # st.dataframe(df)  # debug
     # column_specs=get_column_specs_results_df()
     # pg_to_pretty = {v["pg_name"]: k for k, v in column_specs.items()}
@@ -1804,7 +1808,7 @@ def enter_stock_transaction():
         )
 
     if "transaction_df" not in ss:
-        ss.transaction_df = load_stock_transactions_from_db()
+        ss.transaction_df = load_stock_transactions_from_db(ss.user)
 
     if "transaction_df_prev" not in ss:
         ss.transaction_df_prev = ss.transaction_df.copy()
@@ -1840,6 +1844,7 @@ def enter_stock_transaction():
 
             new_row = {
                 "cik": cik,
+                "user_id": ss.user_id,
                 "date": trade_date,
                 "company_and_ticker": company_and_ticker,
                 "action": action,
@@ -1849,7 +1854,7 @@ def enter_stock_transaction():
             }
 
             postgres_update_bulk(pd.DataFrame([new_row]), "stock_transactions",
-                            primary_key_columns=["cik", "date", "action"])
+                            primary_key_columns=["cik", "user_id", "date", "action"])
 
             ss.transaction_df = pd.concat([ss.transaction_df, pd.DataFrame([new_row])], ignore_index=True)
             ss.transaction_df_prev = ss.transaction_df.copy()
@@ -1894,7 +1899,7 @@ def enter_stock_transaction():
 
     for _, row in new_rows.iterrows():
         postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",
-                        primary_key_columns=["cik", "date", "action"])
+                        primary_key_columns=["cik", "user_id", "date", "action"])
         st.toast("New transaction added.")
 
     # -----------------------------
@@ -1905,7 +1910,7 @@ def enter_stock_transaction():
 
     for _, row in modified.iterrows():
         postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",
-                        primary_key_columns=["cik", "date", "action"])
+                        primary_key_columns=["cik", "user", "date", "action"])
         st.toast("Transaction updated.")
 
     # -----------------------------
@@ -1968,8 +1973,13 @@ def update_inv_primary_filter_session_value(key):
 
 def show_investment_returns():
     print("entering into show_investment_returns function")
-    transactions_df=load_stock_transactions_from_db()
-    ss.rankings_df =load_stock_growth_analysis_data_from_db()
+    transactions_df=load_stock_transactions_from_db(ss.user_id)
+    
+    if transactions_df.empty:
+        st.warning(":red[No transactions found. Please add transactions to see investment returns analysis.]")
+        return
+    
+    ss.rankings_df = load_stock_growth_analysis_data_from_db()
     
     # with st.expander("Expand to show filters", key="temp_filters_expanded", on_change=update_primary_filter_session_value, args=("filters_expanded",)):
         # col1, col2 = st.columns(2)
@@ -1981,18 +1991,18 @@ def show_investment_returns():
         ).rename(columns={'stock_price': 'current_price'})
 
     sector_df = (transaction_profit_df
-                 .groupby('sector', dropna=False)
-                 .agg({'total': 'sum'})
-                 .reset_index()
-                 .sort_values('total', ascending=False)
+                .groupby('sector', dropna=False)
+                .agg({'total': 'sum'})
+                .reset_index()
+                .sort_values('total', ascending=False)
                 )
     sector_list=sector_df['sector'].tolist()
 
     industry_df = (transaction_profit_df
-                 .groupby('industry', dropna=False)
-                 .agg({'total': 'sum'})
-                 .reset_index()
-                 .sort_values('total', ascending=False)
+                .groupby('industry', dropna=False)
+                .agg({'total': 'sum'})
+                .reset_index()
+                .sort_values('total', ascending=False)
                 )
     industry_list=industry_df['industry'].tolist()
     
@@ -2270,7 +2280,7 @@ def show_investment_returns():
     total_mask = investment_returns_df["company_and_ticker"] == "TOTAL"
 
     fields_to_blank_totals = ["ticker","first_purchase_date","months_held","avg_purchase_price","avg_sold_price","current_price","purchase_quantity"
-                              ,"sold_quantity","current_holdings"]
+                            ,"sold_quantity","current_holdings"]
 
     for col in fields_to_blank_totals:
         if col in investment_returns_df.columns:
@@ -2286,9 +2296,9 @@ def show_investment_returns():
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
     investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
-                                                   ,'current_holdings','current_holdings_value','total_gains','total_return_pct'
-                                                   ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
-                                                   ,'first_purchase_date','sector','industry','avg_purchase_price','current_price']]
+                                                ,'current_holdings','current_holdings_value','total_gains','total_return_pct'
+                                                ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
+                                                ,'first_purchase_date','sector','industry','avg_purchase_price','current_price']]
 
     def highlight_total_row(row):
         if row["company_and_ticker"] == "TOTAL":
@@ -2306,9 +2316,9 @@ def show_investment_returns():
     st.dataframe(styled_df,
                 # column_order={'total_return'}, 
                 column_config={
-                     "company_and_ticker":st.column_config.Column("company_and_ticker",pinned=True)
-                 },
-                 )
+                    "company_and_ticker":st.column_config.Column("company_and_ticker",pinned=True)
+                },
+                )
     st.write("")
 
     # Show totals by holding period group
@@ -2353,7 +2363,7 @@ def show_investment_returns():
         for row_dict in state['added_rows']:
             new_row_df = pd.DataFrame([row_dict])
             postgres_update_bulk(new_row_df, "stock_transactions", 
-                            primary_key_columns=["cik", "date", "action"])
+                            primary_key_columns=["cik", "user_id","date", "action"])
             st.toast("New transaction added.")
 
         # Handle Edits
@@ -2371,7 +2381,7 @@ def show_investment_returns():
                 row['last_modified'] = pd.Timestamp.now()  # Update last modified timestamp
                 ss.transaction_df.iloc[row_idx] = row  # Update the session state with the modified row
             #st.toast(f"Updated row {row_idx} with values: {row.to_dict()}") # debug            
-            postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",primary_key_columns=["cik", "date", "action"])
+            postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",primary_key_columns=["cik", "user_id", "date", "action"])
             st.toast(f"Updated row {row_idx}")
 
     # 2. Render the Editor
@@ -2427,6 +2437,7 @@ def transaction_show_modal():
 
         new_row = {
             "cik": td["cik"],
+            "user_id": ss.user_id,
             "date": td["date"],
             "company_and_ticker": td["company_and_ticker"],
             "action": td["transaction_type"],  # 'buy' or 'sell'
@@ -2441,7 +2452,7 @@ def transaction_show_modal():
         
         try:
             postgres_update_bulk(pd.DataFrame([new_row]), "stock_transactions",
-                            primary_key_columns=["cik", "date", "action"])
+                            primary_key_columns=["cik", "user_id", "date", "action"])
             st.toast("Wrote transaction to DB successfully")
         except Exception as e:
             st.error(f"Failed to write transaction to postgress: {e}")
@@ -2450,6 +2461,7 @@ def transaction_show_modal():
         st.rerun()
         # optionally close by rerunning main app logic
         return
+    return
 
 def display_stock_analysis_form(stock_growth_analysis_df):
 
@@ -2485,7 +2497,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         ss.rankings_df = ss.rankings_df.rename(columns=rename_map)
         
         # integrate transaction quantities
-        tx=load_stock_transactions_from_db()
+        tx=load_stock_transactions_from_db(ss.user_id)
         
         # 1) Defensive copy and normalization
         tx['action'] = tx['action'].astype(str).str.strip().str.lower()   # normalize action values
@@ -3085,8 +3097,11 @@ def main():
 
     calc_new_score_btn = load_full_sec_btn = load_incremental_sec_btn = admin_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = False
 
+    params = st.query_params
+    ss.user_id = params.get("user_id", "default")
+
     if ss.hide_menu==False:
-        st.write("Choose an action:")
+        st.write(f"Please choose an action, {ss.user_id}:")
         with color_button("blue"):
             view_stock_analysis_form_btn = st.button("View Stock Data, Update Categories, Enter Stock Transactions",key='view_data_btn')
         with color_button("blue"):
