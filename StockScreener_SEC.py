@@ -3018,26 +3018,57 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Kill floating tooltips 
+import streamlit.components.v1 as components
+
+# 1. Your preferred CSS block (reverted back)
 st.markdown("""
 <style>
-/* 1. When the tooltip has active metrics data injected into it, show it immediately */
-#vg-tooltip-element.vg-tooltip.visible,
-#vg-tooltip-element.vg-tooltip:not(:empty) {
-    visibility: visible !important;
-    opacity: 1 !important;
-    display: block !important;
+/* Prevent the floating element from blocking touch events or visually showing up when empty */
+#vg-tooltip-element {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.1s ease-in-out;
 }
 
-/* 2. When there is no active hover data (empty) OR if the charts have unmounted entirely,
-      instantly break it down so it cannot display a ghost frame on the screen */
-#vg-tooltip-element:empty,
+/* Make the tooltip fully visible only when a chart exists on the page and the tooltip has active text inside it */
+body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
+    opacity: 1 !important;
+}
+
+/* If the graph toggles off, immediately force the tooltip to 0 opacity regardless of browser caching */
 body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
-    visibility: hidden !important;
     opacity: 0 !important;
     display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
+
+# 2. Touch event listener injection
+components.html("""
+<script>
+    const doc = window.parent.document;
+    
+    // Listen for mobile touches across the entire app viewport
+    doc.addEventListener('touchstart', function(e) {
+        // Find if the user is touching a chart block or its children
+        const chartElement = e.target.closest('[data-testid="stVegaLiteChart"]');
+        const tooltip = doc.getElementById('vg-tooltip-element');
+        
+        if (chartElement && tooltip) {
+            // Re-enable pointer events instantly on first touch so Vega can read coordinates
+            tooltip.style.pointerEvents = 'auto';
+        }
+    }, { passive: true });
+
+    // Turn pointer events back off when finger lifts up to keep it clean
+    doc.addEventListener('touchend', function() {
+        const tooltip = doc.getElementById('vg-tooltip-element');
+        if (tooltip) {
+            tooltip.style.pointerEvents = 'none';
+        }
+    }, { passive: true });
+</script>
+""", height=0, width=0)
 
 #st.markdown("""
 #<style>
