@@ -161,6 +161,19 @@ def reset_forms_ss_vars():
     ss.prev_edits={}
     ss.apply_scores_requested=False
     ss.apply_scores_done=False
+    
+    # Clear graph tooltips if any    
+    st.markdown("""
+    <style>
+    /* Forces the phantom Vega/Altair tooltip element to disappear when the chart is gone */
+    div:not(:has([data-testid="stVegaLiteChart"])) ~ #vg-tooltip-element,
+    #vg-tooltip-element:empty {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     return
 
 def safe_divide(a, b=1):
