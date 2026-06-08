@@ -3020,22 +3020,18 @@ st.markdown("""
 # Kill floating tooltips 
 import streamlit.components.v1 as components
 
-# 1. Your preferred CSS block (reverted back)
+# 1. Cleaned-up CSS: We remove 'pointer-events: none' from here to prevent hard-locking touch inputs
 st.markdown("""
 <style>
-/* Prevent the floating element from blocking touch events or visually showing up when empty */
 #vg-tooltip-element {
     opacity: 0 !important;
-    pointer-events: none !important;
     transition: opacity 0.1s ease-in-out;
 }
 
-/* Make the tooltip fully visible only when a chart exists on the page and the tooltip has active text inside it */
 body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
     opacity: 1 !important;
 }
 
-/* If the graph toggles off, immediately force the tooltip to 0 opacity regardless of browser caching */
 body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
     opacity: 0 !important;
     display: none !important;
@@ -3043,30 +3039,51 @@ body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Touch event listener injection
+# 2. Resilient Mutation Observer and Touch Binder
 components.html("""
 <script>
     const doc = window.parent.document;
-    
-    // Listen for mobile touches across the entire app viewport
-    doc.addEventListener('touchstart', function(e) {
-        // Find if the user is touching a chart block or its children
-        const chartElement = e.target.closest('[data-testid="stVegaLiteChart"]');
+
+    // Core function to safely link touch events directly to the chart elements
+    function bindChartTouchEvents() {
+        const charts = doc.querySelectorAll('[data-testid="stVegaLiteChart"]');
         const tooltip = doc.getElementById('vg-tooltip-element');
         
-        if (chartElement && tooltip) {
-            // Re-enable pointer events instantly on first touch so Vega can read coordinates
-            tooltip.style.pointerEvents = 'auto';
-        }
-    }, { passive: true });
+        if (!tooltip) return;
 
-    // Turn pointer events back off when finger lifts up to keep it clean
-    doc.addEventListener('touchend', function() {
-        const tooltip = doc.getElementById('vg-tooltip-element');
-        if (tooltip) {
-            tooltip.style.pointerEvents = 'none';
-        }
-    }, { passive: true });
+        charts.forEach(chart => {
+            // Prevent duplicate listener attachments
+            if (chart.dataset.touchBound === 'true') return;
+
+            // Force interaction rules onto the tooltip instantly when a user touches the chart
+            chart.addEventListener('touchstart', function() {
+                tooltip.style.pointerEvents = 'auto';
+                tooltip.style.display = 'block';
+            }, { passive: true });
+
+            // Ensure the tooltip is reset when the finger lifts off
+            chart.addEventListener('touchend', function() {
+                tooltip.style.pointerEvents = 'none';
+            }, { passive: true });
+
+            // Mark this chart element as successfully bound
+            chart.dataset.touchBound = 'true';
+        });
+    }
+
+    // Monitor the application DOM to instantly catch newly re-rendered charts
+    const observer = new MutationObserver((mutations) => {
+        bindChartTouchEvents();
+    });
+
+    // Start watching your Streamlit page root layout
+    observer.observe(doc.body, {
+        childList: true,
+        subtree: true
+    });
+
+    // Run once immediately on script initialization
+    bindChartTouchEvents();
 </script>
 """, height=0, width=0)
 
