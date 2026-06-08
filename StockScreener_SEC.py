@@ -2992,19 +2992,33 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 # set page config and title
 st.markdown("""
 <style>
-
-/* Works in iPad Web App (PWA) mode */
 @media (max-width: 1024px) {
-    .main {
-        -webkit-transform: scale(0.85);
+    /* Target the exact block container Streamlit uses */
+    [data-testid="stMainBlockContainer"] {
         transform: scale(0.85);
         transform-origin: top left;
-        width: 118%; /* prevents right-side cutoff */
+        width: 117.65% !important; /* Formula: 100 / 0.85 to fix right-side cutoff */
+        max-width: 117.65% !important;
     }
 }
-
 </style>
 """, unsafe_allow_html=True)
+
+#st.markdown("""
+#<style>
+#
+#/* Works in iPad Web App (PWA) mode */
+#@media (max-width: 1024px) {
+#    .main {
+#        -webkit-transform: scale(0.85);
+#        transform: scale(0.85);
+#        transform-origin: top left;
+#        width: 118%; /* prevents right-side cutoff */
+#    }
+#}
+#
+#</style>
+#""", unsafe_allow_html=True)
 
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
