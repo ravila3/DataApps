@@ -3017,6 +3017,25 @@ st.markdown("""
     </script>
 """, unsafe_allow_html=True)
 
+# Kill floating tooltips 
+st.markdown("""
+<style>
+/* Forces the parent app container to instantly purge hidden child layers */
+.main, .stApp, [data-testid="stMainBlockContainer"] {
+    contain: paint !important;
+}
+
+/* Hard-kills any floating tooltips sitting outside the active chart bounding boxes */
+body > #vg-tooltip-element, 
+html > #vg-tooltip-element,
+.__web-inspector-hide-shortcut__ ~ #vg-tooltip-element {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 #st.markdown("""
 #<style>
 #
