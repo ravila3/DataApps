@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit.elements.widgets.data_editor as de
 from streamlit_extras.stylable_container import stylable_container
+import streamlit.components.v1 as components
 import pyarrow as pa
 import pandas as pd
 import altair as alt
@@ -163,16 +164,17 @@ def reset_forms_ss_vars():
     ss.apply_scores_done=False
     
     # Clear graph tooltips if any    
-    st.markdown("""
-    <style>
-    /* Forces the phantom Vega/Altair tooltip element to disappear when the chart is gone */
-    div:not(:has([data-testid="stVegaLiteChart"])) ~ #vg-tooltip-element,
-    #vg-tooltip-element:empty {
-        display: none !important;
-        visibility: hidden !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    components.html("""
+        <script>
+            // Locate Vega's floating tooltip container anywhere on the DOM
+            const tooltip = window.parent.document.getElementById("vg-tooltip-element");
+            if (tooltip) {
+                tooltip.style.display = "none";
+                tooltip.style.visibility = "hidden";
+                tooltip.innerHTML = ""; // Wipes out stuck text/metrics data
+            }
+        </script>
+    """, height=0, width=0)
 
     return
 
