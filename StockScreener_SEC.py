@@ -298,7 +298,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             anchor="middle"
         ),
         padding={"bottom": 0},
-        usermeta={"embedOptions": {"tooltip": {"theme": "none"}}}
+        #usermeta={"embedOptions": {"tooltip": {"theme": "none"}}}
     ).configure_view(
         stroke=None # Cleans up the border which can interfere with offsets
     )
@@ -3020,18 +3020,22 @@ st.markdown("""
 # Kill floating tooltips 
 st.markdown("""
 <style>
-/* 1. Hide the tooltip element globally by default */
+/* 1. Prevent the floating element from blocking touch events or visually showing up when empty */
 #vg-tooltip-element {
-    display: none !important;
     opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.1s ease-in-out;
 }
 
-/* 2. Bring it back ONLY when the user is actively touching/hovering over a live chart block */
-[data-testid="stVegaLiteChart"]:hover ~ #vg-tooltip-element,
-[data-testid="stVegaLiteChart"]:active ~ #vg-tooltip-element,
-#vg-tooltip-element:hover {
-    display: block !important;
+/* 2. Make the tooltip fully visible only when a chart exists on the page and the tooltip has active text inside it */
+body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
     opacity: 1 !important;
+}
+
+/* 3. If the graph toggles off, immediately force the tooltip to 0 opacity regardless of browser caching */
+body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
+    opacity: 0 !important;
+    display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
