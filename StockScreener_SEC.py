@@ -297,11 +297,10 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
             f"{var_name.replace('_', ' ')} Regression for {name}",
             anchor="middle"
         ),
-        padding={"bottom": 0}
+        padding={"bottom": 0},
+        usermeta={"embedOptions": {"tooltip": {"theme": "none"}}}
     ).configure_view(
         stroke=None # Cleans up the border which can interfere with offsets
-    ).configure(
-        tooltip={"theme": "none"}
     )
     
     # st.altair_chart(chart + reg_line, width='content')              
