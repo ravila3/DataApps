@@ -1,4 +1,4 @@
 [theme]
 base="dark"
 primaryColor="FF8C00"
-baseFontSize = 15  # Default is 16
+baseFontSize = 16  # Default is 16
