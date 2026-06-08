@@ -300,6 +300,8 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
         padding={"bottom": 0}
     ).configure_view(
         stroke=None # Cleans up the border which can interfere with offsets
+    ).configure_theme(
+        tooltip={"theme": "none"}
     )
     
     # st.altair_chart(chart + reg_line, width='content')              
