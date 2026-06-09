@@ -2152,7 +2152,8 @@ def show_investment_returns():
     
     investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
     investment_returns_df['industry'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
-    
+    investment_returns_df['Pct_Chg_from_7_Days_Ago'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'pct_chg_from_1w_ago'].values
+
     col1, col2 = st.columns(2)
     with col1:
         sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
@@ -2213,7 +2214,6 @@ def show_investment_returns():
     industry_totals = investment_returns_by_slice(investment_returns_df, 'industry')
 
     # --- ADD TOTALS ROW ---
-
     # Compute totals for numeric columns
     totals = investment_returns_df.select_dtypes(include=[np.number]).sum()
     totals["company_and_ticker"] = "TOTAL"
@@ -2260,7 +2260,7 @@ def show_investment_returns():
     quantity_cols = ["purchase_quantity", "current_holdings"]
     price_cols    = ["avg_purchase_price", "current_price"]
     amount_cols   = ["purchase_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
-    percent_cols  = ["total_return_pct"]
+    percent_cols  = ["total_return_pct","Pct_Chg_from_7_Days_Ago"]
 
     # Format dictionary
     fmt = {}
@@ -2287,7 +2287,6 @@ def show_investment_returns():
     fmt["first_purchase_date"] = lambda d: d.strftime("%Y-%m-%d") if pd.notna(d) else ""
     
     # --- SORT TOTALS TO TOP, THEN BY PURCHASE AMOUNT DESC ---
-
     # Create a sort key: TOTAL row gets 0, others get 1
     investment_returns_df["sort_key"] = (
         investment_returns_df["company_and_ticker"].eq("TOTAL").map({True: 0, False: 1})
@@ -2296,7 +2295,7 @@ def show_investment_returns():
     total_mask = investment_returns_df["company_and_ticker"] == "TOTAL"
 
     fields_to_blank_totals = ["ticker","first_purchase_date","months_held","avg_purchase_price","avg_sold_price","current_price","purchase_quantity"
-                            ,"sold_quantity","current_holdings"]
+                            ,"sold_quantity","current_holdings","Pct_Chg_from_7_Days_Ago"]
 
     for col in fields_to_blank_totals:
         if col in investment_returns_df.columns:
@@ -2311,7 +2310,7 @@ def show_investment_returns():
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
-    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
+    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','Pct_Chg_from_7_Days_Ago','purchase_amount'
                                                 ,'current_holdings','current_holdings_value','total_gains','total_return_pct'
                                                 ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
                                                 ,'first_purchase_date','sector','industry','avg_purchase_price','current_price']]
@@ -2323,7 +2322,7 @@ def show_investment_returns():
 
     styled_df = (
         investment_returns_df.style
-            .map(color_gains, subset=['total_gains',"realized_gains","unrealized_gains","total_return_pct"])
+            .map(color_gains, subset=['total_gains',"realized_gains","unrealized_gains","total_return_pct","Pct_Chg_from_7_Days_Ago"])
             .apply(highlight_total_row, axis=1)
             .format(fmt)
     )
@@ -2332,7 +2331,8 @@ def show_investment_returns():
     st.dataframe(styled_df,
                 # column_order={'total_return'}, 
                 column_config={
-                    "company_and_ticker":st.column_config.Column("company_and_ticker",pinned=True)
+                    "company_and_ticker":st.column_config.Column("company_and_ticker",pinned=True),
+                    "Pct_Chg_from_7_Days_Ago":st.column_config.NumberColumn("7d % Chg", help="Pct change in stock price from 7 days ago to today"),
                 },
                 )
     st.write("")
