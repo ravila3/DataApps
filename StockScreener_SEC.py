@@ -24,6 +24,8 @@ logging.basicConfig(
 )
 
 ss = st.session_state
+
+
 st.markdown("<script>setInterval(() => {window.parent.postMessage({isAlive: true}, '*')}, 15000);</script>", unsafe_allow_html=True)
 
 alt.renderers.set_embed_options(tooltip={"theme": "dark"})
@@ -162,20 +164,6 @@ def reset_forms_ss_vars():
     ss.prev_edits={}
     ss.apply_scores_requested=False
     ss.apply_scores_done=False
-    
-    # Clear graph tooltips if any    
-    components.html("""
-        <script>
-            // Locate Vega's floating tooltip container anywhere on the DOM
-            const tooltip = window.parent.document.getElementById("vg-tooltip-element");
-            if (tooltip) {
-                tooltip.style.display = "none";
-                tooltip.style.visibility = "hidden";
-                tooltip.innerHTML = ""; // Wipes out stuck text/metrics data
-            }
-        </script>
-    """, height=0, width=0)
-
     return
 
 def safe_divide(a, b=1):
@@ -3008,37 +2996,130 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 # set page config and title
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
-st.markdown("""
-    <script>
-        var meta = document.createElement('meta');
-        meta.name = "viewport";
-        meta.content = "width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes";
-        document.getElementsByTagName('head')[0].appendChild(meta);
-    </script>
-""", unsafe_allow_html=True)
+# st.markdown("""
+#    <script>
+#        var meta = document.createElement('meta');
+#        meta.name = "viewport";
+#        meta.content = "width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes";
+#        document.getElementsByTagName('head')[0].appendChild(meta);
+#    </script>
+# """, unsafe_allow_html=True)
 
 # Kill floating tooltips 
+import streamlit as st
+import streamlit.components.v1 as components
 
-# 1. Base structure control
+st.set_page_config(page_title="Stock Screener", layout="wide")
+
+# 1. Consolidated CSS Injector (Strips ghost margins, hides iframe wrappers, and pulls page up)
 st.markdown("""
 <style>
-#vg-tooltip-element {
-    opacity: 0 !important;
-    transition: opacity 0.1s ease-in-out;
-}
-body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
-    opacity: 1 !important;
-}
-body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
-    opacity: 0 !important;
-    display: none !important;
-}
+    /* Pull content to the very top of the screen */
+    [data-testid="stAppViewContainer"] .main .block-container,
+    .reportview-container .main .block-container,
+    .block-container {
+        max-width: none !important;
+        width: 100% !important;
+        padding-top: 0.5rem !important; /* Forces top alignment */
+        padding-bottom: 1rem !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    /* Completely collapse the iframe component container wrapper */
+    div:has(> div[data-testid="stLayoutWrapper"] iframe), 
+    div[data-testid="stLayoutWrapper"]:has(iframe) {
+        display: none !important;
+        height: 0px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* Collapse empty markdown spacing containers at the top of the page */
+    .block-container > div[data-testid="stVerticalBlock"] > .stElementContainer:has(.stMarkdown):empty,
+    .block-container > div[data-testid="stVerticalBlock"] > .stElementContainer:has(style) {
+        display: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* Vega Tooltip Adjustments */
+    #vg-tooltip-element {
+        opacity: 0 !important;
+        transition: opacity 0.1s ease-in-out;
+        z-index: 1000000 !important;
+        position: fixed !important;
+    }
+    body:has([data-testid="stVegaLiteChart"]) #vg-tooltip-element.vg-tooltip {
+        opacity: 1 !important;
+    }
+    body:not(:has([data-testid="stVegaLiteChart"])) #vg-tooltip-element {
+        opacity: 0 !important;
+        display: none !important;
+    }
+    .vega-tooltip {
+        position: fixed !important;
+        transform: translate(0, 0) !important;
+        left: auto !important;
+        top: auto !important;
+        pointer-events: none !important;
+        z-index: 9999 !important;
+        max-width: 200px !important;
+        font-size: 12px !important;
+        padding: 4px 6px !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+    }
+
+    /* Layout & Cards Spacing */
+    .stCard, .stExpander, .css-1lcbmhc { 
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+    }
+    .clipped-block {
+        position: relative;
+        overflow: hidden;
+    }
+    .tooltip-wrapper {
+        position: relative;
+        display: inline-block;
+    }
+    .tooltip-wrapper:hover .tooltip-bubble {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    .tooltip-bubble {
+        opacity: 0;
+        transition: opacity 0.15s ease-in-out;
+        position: absolute;
+        top: -5px;
+        left: 105%;
+        background: #333;
+        color: white;
+        padding: 6px 10px;
+        border-radius: 4px;
+        white-space: nowrap;
+        z-index: 9999;
+        font-size: 0.8rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Dynamic Reset & Re-Bind Script
+# 2. Alive & Tooltip Reset Script (Kept together inside a hidden execution layer)
 components.html("""
 <script>
+    // Keep alive trigger
+    setInterval(() => { window.parent.postMessage({isAlive: true}, '*') }, 15000);
+
+    // Fade tooltip on parent scroll
+    window.parent.addEventListener('scroll', function() {
+        const el = window.parent.document.getElementById('vg-tooltip-element');
+        if (el) { el.style.opacity = 0; }
+    });
+
+    // Vega touch binder 
     const doc = window.parent.document;
     let lastChartCount = 0;
 
@@ -3046,22 +3127,16 @@ components.html("""
         const tooltip = doc.getElementById('vg-tooltip-element');
         const charts = doc.querySelectorAll('[data-testid="stVegaLiteChart"]');
         
-        // If the number of charts changed, or a chart re-rendered, execute a clean reset
         if (charts.length !== lastChartCount || Array.from(charts).some(c => !c.dataset.touchBound)) {
-            
-            // Hard reset the tooltip element back to its factory default state
             if (tooltip) {
                 tooltip.style.pointerEvents = 'none';
                 tooltip.style.opacity = '0';
                 tooltip.innerHTML = ''; 
-                tooltip.className = 'vg-tooltip'; // Strips out broken or stuck classes
+                tooltip.className = 'vg-tooltip';
             }
 
-            // Bind touch triggers fresh to the visible charts
             charts.forEach(chart => {
-                // Strip old listener reference if it existed
                 chart.removeAttribute('data-touch-bound');
-
                 chart.addEventListener('touchstart', function() {
                     if (tooltip) {
                         tooltip.style.pointerEvents = 'auto';
@@ -3075,109 +3150,17 @@ components.html("""
                     }
                 }, { passive: true });
 
-                // Mark as successfully fresh-bound
                 chart.dataset.touchBound = 'true';
             });
-
             lastChartCount = charts.length;
         }
     }
 
-    // Monitor mutations to trigger the reset routine immediately on DOM updates
-    const observer = new MutationObserver(() => {
-        resetAndBindCharts();
-    });
-
-    observer.observe(doc.body, {
-        childList: true,
-        subtree: true
-    });
-
-    // Run immediately on layer mount
+    const observer = new MutationObserver(() => { resetAndBindCharts(); });
+    observer.observe(doc.body, { childList: true, subtree: true });
     resetAndBindCharts();
 </script>
 """, height=0, width=0)
-
-#st.markdown("""
-#<style>
-#
-#/* Works in iPad Web App (PWA) mode */
-#@media (max-width: 1024px) {
-#    .main {
-#        -webkit-transform: scale(0.85);
-#        transform: scale(0.85);
-#        transform-origin: top left;
-#        width: 118%; /* prevents right-side cutoff */
-#    }
-#}
-#
-#</style>
-#""", unsafe_allow_html=True)
-
-st.markdown(
-    """
-    <style>
-    /* Make the main container full width and reduce gutters */
-    [data-testid="stAppViewContainer"] .main .block-container,
-    .reportview-container .main .block-container,
-    .block-container {
-        max-width: none !important;
-        width: 100% !important;
-        padding-left: 0.5rem !important;
-        padding-right: 0.5rem !important;
-        margin-left: 0 !important;
-        margin-right: 0 !important;
-    }
-
-    /* Optional: tighten inner cards/containers */
-    .stCard, .stExpander, .css-1lcbmhc { 
-        padding-left: 0.5rem !important;
-        padding-right: 0.5rem !important;
-    }
-
-    /* If you want absolutely no side padding */
-    /* .block-container { padding-left: 0 !important; padding-right: 0 !important; } */
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Global CSS for clipping container + tooltip behavior
-st.markdown("""
-<style>
-/* iPad overflow fix */
-.clipped-block {
-    position: relative;
-    overflow: hidden;
-}
-
-/* Tooltip styling */
-.tooltip-wrapper {
-    position: relative;
-    display: inline-block;
-}
-
-.tooltip-wrapper:hover .tooltip-bubble {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.tooltip-bubble {
-    opacity: 0;
-    transition: opacity 0.15s ease-in-out;
-    position: absolute;
-    top: -5px;
-    left: 105%;
-    background: #333;
-    color: white;
-    padding: 6px 10px;
-    border-radius: 4px;
-    white-space: nowrap;
-    z-index: 9999;
-    font-size: 0.8rem;
-}
-</style>
-""", unsafe_allow_html=True)
 
 st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 st.write('Created by Rafael Avila leveraging Streamlit and Postgres, using SEC Filings data provided by SEC Edgar platform and Stock data from Yahoo Finance.')
