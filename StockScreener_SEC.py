@@ -2298,8 +2298,8 @@ def show_investment_returns():
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
-    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','Pct_Chg_from_7_Days_Ago','purchase_amount'
-                                                ,'current_holdings','current_holdings_value','total_gains','total_return_pct'
+    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
+                                                ,'current_holdings','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','total_return_pct'
                                                 ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
                                                 ,'first_purchase_date','sector','industry','avg_purchase_price','current_price']]
 
@@ -2584,7 +2584,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     def build_styler(df, max_col_width: str = "140px"):
         
         styled = df.style
-        
+
         cols_for_color_inc=[
                 'div_yield','gain_pct','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
@@ -2594,10 +2594,10 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 ,'Consolidated_Score','Growth_Quality','Stability_Trend','Recent_Momentum'
             ]
         cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
-        cols_for_color_dec = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
+        cols_for_color_desc = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
 
         q_inc = compute_quantiles(df, cols_for_color_inc)
-        q_dec = compute_quantiles(df, cols_for_color_dec)
+        q_dec = compute_quantiles(df, cols_for_color_desc)
         q_bottom = compute_low_quantiles(df, cols_red_bottom_quintile)
         
         for col, (q20, q40, q60, q80) in q_inc.items():
@@ -3169,10 +3169,8 @@ def main():
     print("starting main function")
 
 # features to build:
-# add dividend yield to yahoo data
 # provide info on insider transactions
 # provide info on analyst estimate revisions
-# enable multiple users
 
 # completed features:
 # update of yahoo data for selected companies - completed 3/9/26
@@ -3183,6 +3181,9 @@ def main():
 # update bought/sold shares and provide summary of rate of return - completed 3/16/26
 # look for new SEC filings, perform incremental updates  - completed 3/16/26
 # added % chg vs 7 days ago - completed 3/16/26
+# add dividend yield to yahoo data - completed 4/15/26
+# Enhanced investment returns with sector & industry breakdowns - 6/1/26
+# enable multiple users - completed 6/8/26
 
     calc_new_score_btn = load_full_sec_btn = load_incremental_sec_btn = admin_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = False
 
