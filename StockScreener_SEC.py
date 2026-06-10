@@ -1150,6 +1150,7 @@ def update_yahoo_data_for_company(cik):
         sector = yahoo_stats.get('sector')
         company_desc = yahoo_stats.get('longBusinessSummary')
         stock_price = safe_round(yahoo_stats.get("currentPrice"),2)
+        volume = clean_number(yahoo_stats.get('volume'))
         price_range_52wks = yahoo_stats.get("fiftyTwoWeekRange")
         pct_chg_from_52wk_high = yahoo_stats.get("fiftyTwoWeekHighChangePercent")
         pct_chg_from_52wk_low = yahoo_stats.get("fiftyTwoWeekLowChangePercent")
@@ -1188,6 +1189,7 @@ def update_yahoo_data_for_company(cik):
         'industry': industry,
         'sector': sector,
         'stock_price' : stock_price,
+        'volume': volume,
         'price_range_52wks' : price_range_52wks,
         'pct_chg_from_52wk_high' : safe_multiply(safe_round(pct_chg_from_52wk_high,3),100),
         'pct_chg_from_52wk_low' : safe_multiply(safe_round(pct_chg_from_52wk_low,3),100),
@@ -2292,7 +2294,7 @@ def show_investment_returns():
     # Sort: TOTAL first, then by purchase_amount descending
     investment_returns_df = (
         investment_returns_df
-            .sort_values(["sort_key", "current_holdings_value"], ascending=[True, False])
+            .sort_values(["sort_key", "purchase_amount"], ascending=[True, False])
             .reset_index(drop=True)
     )
 
@@ -2479,7 +2481,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','curr_value','gain_pct', # 'price_range_52wks',
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','curr_value','gain_pct', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
@@ -2586,7 +2588,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         styled = df.style
 
         cols_for_color_inc=[
-                'div_yield','gain_pct','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
+                'div_yield','gain_pct', 'volume','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
@@ -2923,6 +2925,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'sector': st.column_config.TextColumn(label="sector"),
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%,.0f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
+                'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
                 'curr_value':st.column_config.NumberColumn(label="Curr Value", help="Current Value of Holdings", format='dollar', step='int', width="small"),
                 'gain_pct': st.column_config.NumberColumn(label="Gain %", help="Total Gain Percentage on holdings", format='%.1f', width="small"),
                 # 'price_range_52wks': st.column_config.TextColumn(),
@@ -3169,10 +3172,14 @@ def main():
     print("starting main function")
 
 # features to build:
+# Add volume to stock analysis view
+# AI bot to create summaries on rebalancing current holding, potential momentum stocks
+# Flag potential at risk holdings on investment returns view
+# potentially add 7d stock price change to Momentum Score?
 # provide info on insider transactions
 # provide info on analyst estimate revisions
 
-# completed features:
+# COMPLETED FEATURES:
 # update of yahoo data for selected companies - completed 3/9/26
 # updated charts to use st.write for title to avoid getting them cut off - completed 3/9/26
 # Fixed bug causing stocks to be associated to non-primary ticker if multiple tickers exist - completed 3/9/26
