@@ -34,7 +34,6 @@ def get_latest_10q_accession(cik: str):
 def accession_to_folder(accn: str) -> str:
     return accn.replace("-", "")
 
-
 def get_filing_index_json(cik: str, folder: str):
     url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{folder}/index.json"
     r = requests.get(url, headers=HEADERS)
@@ -458,16 +457,24 @@ def parse_ixbrl_units(html_text: str):
 # ---------- Full pipeline ----------
 
 def fetch_and_normalize_latest_10q(cik: str):
+    debug_flag = False #debug
+    
     entity_name, accn, filed_date = get_latest_10q_accession(cik)
     if not accn:
         raise ValueError(f"No 10-Q found for CIK {cik}")
 
-    # st.write(f"Latest 10-Q for {entity_name} (CIK {cik}): {accn}")  # debug
+    if debug_flag:
+        st.write(f"Latest 10-Q for {entity_name} (CIK {cik}): {accn}")  # debug
+
     folder = accession_to_folder(accn)
     index_json = get_filing_index_json(cik, folder)
-    # st.write("index_json",index_json) #debug
+    if debug_flag:
+        st.write("index_json",index_json) #debug
 
     filename, content = find_instance_document(cik, folder, index_json)
+    if debug_flag:
+        st.write(f"Found instance document: {filename}")  # debug
+        st.write("Instance content (first 500 chars):", content[:500])  # debug
 
     if filename.lower().endswith(".htm"):
         # Inline XBRL is the ONLY instance document
@@ -477,6 +484,12 @@ def fetch_and_normalize_latest_10q(cik: str):
         units = parse_ixbrl_units(content)               # <xbrli:unit> inside HTML (you need this too)
 
         normalized = normalize_facts(cik, entity_name, filed_date, ix_facts, contexts, units, accn, "10-Q")
+        if debug_flag:
+            st.write("Extracted inline XBRL facts:", ix_facts)  # debug
+            st.write("Parsed contexts:", contexts)  # debug
+            st.write("Parsed units:", units)  # debug
+            st.write("Normalized facts:", normalized)  # debug
+            st.stop()
         return accn, filename, normalized
 
     # ---------------------------------------------------------

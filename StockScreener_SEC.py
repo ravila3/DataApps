@@ -2170,10 +2170,39 @@ def show_investment_returns():
                     'realized_gains': 'sum',
                     'unrealized_gains': 'sum',
                     'purchase_quantity': 'sum',
-                    'current_holdings': 'sum'
-                })
+                    'current_holdings': 'sum',
+                    # New: counts
+                    'total_return_pct': [
+                        ('positive_count', lambda x: (x > 0).sum()),
+                        ('negative_count', lambda x: (x < 0).sum()),
+                        ('zero_count',     lambda x: (x == 0).sum()),
+                    ]
+                    })
                 .reset_index()
         )
+        
+        def flatten(col):
+            # If it's not a tuple, return as-is
+            if not isinstance(col, tuple):
+                return col
+
+            base, agg = col
+
+            # Case 1: group-by column → agg is '' or None
+            if agg in ("", None):
+                return base
+
+            # Case 2: sum → keep only the base name
+            if agg == "sum":
+                return base
+
+            # Otherwise, append the aggregation name
+            return f"{base}_{agg}"
+
+        grouped_totals_df.columns = [flatten(col) for col in grouped_totals_df.columns]
+
+        # st.write('grouped_totals_df = ',grouped_totals_df) # debug
+        # st.stop()
     
         # Total return (current value vs cost basis)
         grouped_totals_df['total_return_pct'] = (grouped_totals_df['total_gains'] /
@@ -2397,11 +2426,13 @@ def show_investment_returns():
     if "transaction_df" not in ss:
         ss.transaction_df = transactions_df
 
+    ss.transaction_df = ss.transaction_df.sort_values(by=['company_and_ticker'], ascending=False)
+    
     st.data_editor(
         ss.transaction_df,
         num_rows="dynamic",
         column_config={
-            'quantity': st.column_config.NumberColumn("Quantity", step=1),
+            'quantity': st.column_config.NumberColumn("Quantity", format="%.2f"),
             'price': st.column_config.NumberColumn("Price", format="$%.2f"),
             'total': st.column_config.NumberColumn("Total Amount", format="$%.2f")
         },
@@ -3009,8 +3040,6 @@ st.set_page_config(page_title="Stock Screener", layout="wide")
 # """, unsafe_allow_html=True)
 
 # Kill floating tooltips 
-import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
@@ -3172,7 +3201,6 @@ def main():
     print("starting main function")
 
 # features to build:
-# Add volume to stock analysis view
 # AI bot to create summaries on rebalancing current holding, potential momentum stocks
 # Flag potential at risk holdings on investment returns view
 # potentially add 7d stock price change to Momentum Score?
@@ -3191,6 +3219,7 @@ def main():
 # add dividend yield to yahoo data - completed 4/15/26
 # Enhanced investment returns with sector & industry breakdowns - 6/1/26
 # enable multiple users - completed 6/8/26
+# Add volume to stock analysis view - completed 6/10/26
 
     calc_new_score_btn = load_full_sec_btn = load_incremental_sec_btn = admin_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = False
 

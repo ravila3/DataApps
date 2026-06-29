@@ -370,7 +370,7 @@ def sec_edgar_financial_load(cik):
     
     debug_flag=0 #debug
     frame_criteria='2025Q3' #debug '2024Q4' is an example
-    metric_criteria='RevenueFromContractWithCustomerExcludingAssessedTax' # 'RevenueFromContractsWithCustomers','Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
+    metric_criteria='NetIncomeLoss' # 'RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractsWithCustomers','Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
     metrics_df=pd.DataFrame()
 
     # cik = '0000732717' #936528 1050446 1821806
@@ -478,8 +478,8 @@ def sec_edgar_financial_load(cik):
             max_filing_10q_10k_date = latest_row['filingDate']
             latest_accn = latest_row['accessionNumber']
             
-            # max_report_date = filings_10q_10k_df['reportDate'].max()
-            # st.write(f"Filings DataFrame for filings_10q_10k_df: ",filings_10q_10k_df) # debug
+            # st.write(f"Latest 10-Q/10-K filing date: {max_filing_10q_10k_date}, Accession Number: {latest_accn}") #debug
+            # st.write(f"Filings DataFrame for filings_df: ",filings_df) # debug
 
             # Display URLs for all recent filings
             for index, filing in filings_df.iterrows():
@@ -579,9 +579,11 @@ def sec_edgar_financial_load(cik):
                                         "fp": rec.get("fp")
                                     })
                     
-                    # st.write('max_filing_date from companyfacts_url',max_filing_date) #debug
-                    if latest_accn not in companyfacts_accns:
-                    #if max_filing_10q_10k_date < datetime.today()-timedelta(days=90):
+                    # st.write('latest_accn',latest_accn) #debug
+                    # st.write('companyfacts_accns',companyfacts_accns) #debug
+                    
+                    # if latest_accn not in companyfacts_accns:
+                    if max_filing_10q_10k_date < datetime.today()-timedelta(days=90):
                         most_recent_10q_10k_dict = edgar_get_latest_10q_10k_facts(cik)
                         nrt_facts = most_recent_10q_10k_dict.get("facts", {})
                         # st.write('nrt_facts',nrt_facts) #debug
