@@ -2363,7 +2363,7 @@ def show_investment_returns():
             .format(fmt)
     )
     st.write("### Totals by Holding Period Group")
-    st.dataframe(holding_period_totals_styled, use_container_width=True)
+    st.dataframe(holding_period_totals_styled, column_config={"holding_period_group": st.column_config.Column("Holding Period Group", width="medium", pinned=True)}, use_container_width=True)
 
     # Show totals by sector
     sector_totals_styled = (
@@ -2372,7 +2372,7 @@ def show_investment_returns():
             .format(fmt)
     )
     st.write("### Totals by Sector")
-    st.dataframe(sector_totals_styled, use_container_width=True)
+    st.dataframe(sector_totals_styled, column_config={"sector": st.column_config.Column("Sector", width="medium", pinned=True)}, use_container_width=True)
 
     # Show totals by industry
     industry_totals_styled = (
@@ -2381,7 +2381,7 @@ def show_investment_returns():
             .format(fmt)
     )
     st.write("### Totals by Industry")
-    st.dataframe(industry_totals_styled, use_container_width=True)
+    st.dataframe(industry_totals_styled, column_config={"industry": st.column_config.Column("Industry", width="medium", pinned=True)}, use_container_width=True)
 
     ########################################################################################
     # 1. Define the callback to handle database sync
@@ -2426,7 +2426,7 @@ def show_investment_returns():
     if "transaction_df" not in ss:
         ss.transaction_df = transactions_df
 
-    ss.transaction_df = ss.transaction_df.sort_values(by=['company_and_ticker'], ascending=False)
+    ss.transaction_df = ss.transaction_df.sort_values(by=['date'], ascending=False)
     
     st.data_editor(
         ss.transaction_df,
