@@ -25,7 +25,6 @@ logging.basicConfig(
 
 ss = st.session_state
 
-
 st.markdown("<script>setInterval(() => {window.parent.postMessage({isAlive: true}, '*')}, 15000);</script>", unsafe_allow_html=True)
 
 alt.renderers.set_embed_options(tooltip={"theme": "dark"})
@@ -76,11 +75,11 @@ st.markdown("""
 
 if "quarterly_financials" not in ss:
     ss.quarterly_financials = pd.DataFrame()
+    ss.transaction_df = pd.DataFrame()
     ss.results_df = pd.DataFrame()
     ss.editable_stock_growth_analysis_df = pd.DataFrame()
     ss.styled_editable_stock_growth_analysis_df = pd.DataFrame()
     ss.company_lookup_df = pd.DataFrame()
-    ss.transactions_table = pd.DataFrame()
     ss.rankings_df = pd.DataFrame()
     ss.filtered_df = pd.DataFrame()
     ss.metrics={}
@@ -141,6 +140,7 @@ def safe_multiply(x, n=1):
 
 def reset_forms_ss_vars():
     ss.rankings_df.drop(ss.rankings_df.index, inplace=True)
+    ss.transaction_df.drop(ss.transaction_df.index, inplace=True)
     ss.hide_menu=ss.view_stock_analysis_form=ss.transaction_show_modal=ss.show_transaction_form=ss.qtr_data_form=ss.investment_returns_form=ss.process_yahoo_and_statistics=False
     ss.load_sec_incremental_filings=ss.load_sec_full_filings=False
     ss.selected_company=None
@@ -975,8 +975,11 @@ def compute_value_score_on_df(show_df=False):
             + 1.0 * inc_last3q_vs_trend
             - 3 * (3 - to_num('last3q_income_positive'))
             )
+        RM_capped = RM_raw.clip(lower=-100, upper=100)
+        # RM_capped = RM_raw.where(RM_raw >= 0, 0).clip(upper=100)
+        # RM_capped = RM_raw.where(RM_raw <= 0, 0).clip(lower=100)
 
-        df['recent_momentum'] = RM_raw.round(1)
+        df['recent_momentum'] = RM_capped.round(1)
 
         # --- Stability (ST) -------------------------------------------------------------------------------------
 
@@ -1000,13 +1003,13 @@ def compute_value_score_on_df(show_df=False):
 
         fpe = pd.to_numeric(df.get('forward_pe', pd.Series(dtype=float)), errors='coerce').fillna(0)
         fpe = fpe.where(fpe >= 0, 0)
-        fpe_component = 1.5*fpe # 5*np.log1p(fpe)
+        fpe_component = 1.1*fpe # 5*np.log1p(fpe)
 
         tps = pd.to_numeric(df.get('trailing_ps', pd.Series(dtype=float)), errors='coerce').fillna(0)
         tps = tps.where(tps >= 0, 0)
         tps_component = 12*tps # 20*np.log1p(tps)
         
-        price_ratio_components = pd.concat([tpe_component,np.maximum(fpe_component,tps_component)],axis=1)
+        price_ratio_components = pd.concat([tps_component,np.maximum(fpe_component,tpe_component)],axis=1)
         price_ratio_components = price_ratio_components.where(price_ratio_components > 0, np.nan)
 
         VP_raw=price_ratio_components.min(axis=1, skipna=True)
@@ -1054,7 +1057,7 @@ def compute_value_score_on_df(show_df=False):
         df['GC_rev_n_count_penalty']=rev_n_count_penalty.round(2) #debug
         df['GC_inc_n_count_penalty']=inc_n_count_penalty.round(2) #debug
         df['GC_income_revenue_ratio_d']=income_revenue_ratio.round(2) #debug
-        df['recent_momentum_d'] = RM_raw.round(1)
+        df['recent_momentum_d'] = RM_capped.round(1)
         df['RM_capped_rev'] = capped_rev.round(1)
         df['RM_capped_inc'] = capped_inc.round(1)
         df['RM_rev_last3q_vs_trend'] = rev_last3q_vs_trend.round(1)
@@ -1979,9 +1982,9 @@ def update_inv_primary_filter_session_value(key):
 
 def show_investment_returns():
     print("entering into show_investment_returns function")
-    transactions_df=load_stock_transactions_from_db(ss.user_id)
+    ss.transaction_df=load_stock_transactions_from_db(ss.user_id)
     
-    if transactions_df.empty:
+    if ss.transaction_df.empty:
         st.warning(":red[No transactions found. Please add transactions to see investment returns analysis.]")
         return
     
@@ -1992,7 +1995,7 @@ def show_investment_returns():
         # with col1:
         #     start_date = st.date_input("Start Date", key='temp_filter_start_date', on_change=update_primary_filter_session_value, args=("filter_start_date",))
     
-    transaction_profit_df = transactions_df.merge(
+    transaction_profit_df = ss.transaction_df.merge(
         ss.rankings_df[['cik', 'ticker', 'stock_price','sector','industry']], on='cik', how='left'
         ).rename(columns={'stock_price': 'current_price'})
 
@@ -2012,7 +2015,7 @@ def show_investment_returns():
                 )
     industry_list=industry_df['industry'].tolist()
     
-    # --- Build investment_returns_df from transactions_df and rankings_df ---
+    # --- Build investment_returns_df from transaction_df and rankings_df ---
 
     # Split buys and sells
     buys  = transaction_profit_df[transaction_profit_df['action'] == 'Buy'].copy()
@@ -2389,10 +2392,16 @@ def show_investment_returns():
         state = ss.my_editor
         
         # Handle Deletions
+        # Sort indices descending so shifting doesn't cause out-of-bound errors or wrong deletions
+        sorted_deleted_indices = sorted(state['deleted_rows'], reverse=True)
+
         for row_idx in state['deleted_rows']:
             row = ss.transaction_df.iloc[row_idx]
             postgres_delete_single_transaction(row)
             st.toast(f"Deleted row {row_idx}")
+                        
+            # Drop rows from the session state dataframe & reset index
+            ss.transaction_df = ss.transaction_df.drop(state['deleted_rows']).reset_index(drop=True)
 
         # Handle Additions
         for row_dict in state['added_rows']:
@@ -2409,8 +2418,10 @@ def show_investment_returns():
                 if [col] in [['company_and_ticker']]:
                     continue # skip updating company_and_ticker since it's not an editable field and we don't want to accidentally overwrite it
                 row[col] = val
-                if col in ['quantity', 'price']:
-                    row['total'] = row['quantity'] * row['price']  # Recalculate total if quantity or price changed
+                if col in ['quantity']:
+                    row['price'] = row['total'] / row['quantity'] if row['quantity'] != 0 else 0  # Recalculate price if quantity changed
+                if col in ['price']:
+                    row['total'] = row['quantity'] * row['price']  # Recalculate total if price changed
                 if col == 'total':
                     row['price'] = row['total'] / row['quantity'] if row['quantity'] != 0 else 0  # Recalculate price if total changed
                 row['last_modified'] = pd.Timestamp.now()  # Update last modified timestamp
@@ -2418,16 +2429,20 @@ def show_investment_returns():
             #st.toast(f"Updated row {row_idx} with values: {row.to_dict()}") # debug            
             postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",primary_key_columns=["cik", "user_id", "date", "action"])
             st.toast(f"Updated row {row_idx}")
+            
+            st.rerun()  # Rerun the app to reflect changes in the UI
 
     # 2. Render the Editor
     st.subheader('Transactions to date for viewing/editing:')
+    st.write(f':blue[For stock splits, edit the quantity, which will automatically recalculate price without changing total]')
 
     # Ensure the DF is in session state
-    if "transaction_df" not in ss:
-        ss.transaction_df = transactions_df
+    # if "transaction_df" not in ss:
+    #     ss.transaction_df = transaction_df
 
     ss.transaction_df = ss.transaction_df.sort_values(by=['date'], ascending=False)
-    
+    # st.write("ss.transaction_df",ss.transaction_df) #debug
+
     st.data_editor(
         ss.transaction_df,
         num_rows="dynamic",
