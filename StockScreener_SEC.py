@@ -911,7 +911,6 @@ def compute_value_score_on_df(show_df=False):
                 s = s.clip(lo, hi)
             return s
 
-
         # --- Growth Quality (GQ) --------------------------------------------------------------------------------
  
         capped_rev_growth_PCT = to_num('revenue_growth_pct').clip(upper=100,lower=-100)
@@ -1009,7 +1008,7 @@ def compute_value_score_on_df(show_df=False):
         tps = tps.where(tps >= 0, 0)
         tps_component = 12*tps # 20*np.log1p(tps)
         
-        price_ratio_components = pd.concat([tps_component,np.maximum(fpe_component,tpe_component)],axis=1)
+        price_ratio_components = pd.concat([np.maximum(tpe_component,fpe_component),np.maximum(tpe_component,fpe_component,tps_component)],axis=1)
         price_ratio_components = price_ratio_components.where(price_ratio_components > 0, np.nan)
 
         VP_raw=price_ratio_components.min(axis=1, skipna=True)
