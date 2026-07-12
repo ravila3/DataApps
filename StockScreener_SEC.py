@@ -2429,7 +2429,7 @@ def show_investment_returns():
             postgres_update_bulk(pd.DataFrame([row]), "stock_transactions",primary_key_columns=["cik", "user_id", "date", "action"])
             st.toast(f"Updated row {row_idx}")
             
-            st.rerun()  # Rerun the app to reflect changes in the UI
+            # st.rerun()  # Rerun the app to reflect changes in the UI
 
     # 2. Render the Editor
     st.subheader('Transactions to date for viewing/editing:')
