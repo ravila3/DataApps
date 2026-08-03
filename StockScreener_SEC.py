@@ -3275,6 +3275,7 @@ def main():
             window.parent.scrollTo({ top: 0, behavior: 'smooth' });
         </script>
         """)
+        st.subheader("Updating SEC data, please wait...")
         write_sec_data_into_db('single')
         print("updated SEC data, rerunning app")
         st.rerun()
