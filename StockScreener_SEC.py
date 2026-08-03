@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.elements.widgets.data_editor as de
 from streamlit_extras.stylable_container import stylable_container
-import streamlit.components.v1 as components
+# import streamlit.components.v1 as components
 import pyarrow as pa
 import pandas as pd
 import altair as alt
@@ -123,6 +123,7 @@ if "quarterly_financials" not in ss:
     ss.apply_scores_done=False
     ss.compute_value_show_df = False
     ss.user_id = None
+    ss.update_sec_data_btn=False
 
 if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
@@ -165,6 +166,7 @@ def reset_forms_ss_vars():
     ss.prev_edits={}
     ss.apply_scores_requested=False
     ss.apply_scores_done=False
+    ss.update_sec_data_btn=False
     return
 
 def safe_divide(a, b=1):
@@ -1489,6 +1491,9 @@ def write_sec_data_into_db(load_type):
     
     cik_list = []
     
+    if load_type == 'single':
+        cik_list = [ss.selected_company]
+    
     if load_type == 'full':
         cik_list = ss.company_lookup_df['cik'].tolist()
         # cik_list=cik_list[6000:] #[:2] - limit to first 2 CIKs for testing
@@ -1660,7 +1665,13 @@ def write_sec_data_into_db(load_type):
     
     # Now go get the rest of the data for thesee companies and run regressions, and update the stock_growth_analysis_results
     rank_companies_by_growth_and_update_DB(cik_list)
-    reset_forms_ss_vars()
+    if load_type != 'single':
+        reset_forms_ss_vars()
+    
+    if load_type == 'single':
+        ss.update_sec_data_btn=False
+        ss.results_df = load_stock_growth_analysis_data_from_db()
+    
     # ss.results_df=load_stock_growth_analysis_data_from_db()
     # st.write(ss.results_df) # debug?
     # st.stop() debug
@@ -1969,6 +1980,13 @@ def show_regression_charts(cik):
         code_line = linecache.getline(filename, line_no).strip()
         st.warning(f"Failed to append data due to {e}, file: {filename}, line #{line_no}, code line: {code_line}")
         # st.warning(f"Regression failed: {e}")
+        
+    with color_button("red"):
+        update_sec_data_btn = st.button("Click to pull latest SEC data and update stock growth analysis for this company")
+    
+    if update_sec_data_btn:
+        ss.update_sec_data_btn = True
+    
     print('exiting show_regression_charts function')
     return()
 
@@ -3044,7 +3062,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         # display_stock_analysis_form()
         show_regression_charts(cik)
 
-
     with color_button('gray'):
         return_menu2_btn=st.button('Return to Menu ')
     if return_menu2_btn:
@@ -3166,7 +3183,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 2. Alive & Tooltip Reset Script (Kept together inside a hidden execution layer)
-components.html("""
+st.html("""
 <script>
     // Keep alive trigger
     setInterval(() => { window.parent.postMessage({isAlive: true}, '*') }, 15000);
@@ -3218,7 +3235,7 @@ components.html("""
     observer.observe(doc.body, { childList: true, subtree: true });
     resetAndBindCharts();
 </script>
-""", height=0, width=0)
+""")
 
 st.markdown('<h2 style="color:#3894f0;">Stock Screener for Publically Traded Stocks</h2>', unsafe_allow_html=True)
 st.write('Created by Rafael Avila leveraging Streamlit and Postgres, using SEC Filings data provided by SEC Edgar platform and Stock data from Yahoo Finance.')
@@ -3251,7 +3268,17 @@ def main():
 
     params = st.query_params
     ss.user_id = params.get("user_id", "default")
-
+    
+    if ss.update_sec_data_btn==True:
+        st.html("""
+        <script>
+            window.parent.scrollTo({ top: 0, behavior: 'smooth' });
+        </script>
+        """)
+        write_sec_data_into_db('single')
+        print("updated SEC data, rerunning app")
+        st.rerun()
+    
     if ss.hide_menu==False:
         st.write(f"Please choose an action, {ss.user_id}:")
         with color_button("blue"):
@@ -3406,6 +3433,10 @@ def main():
             
         st.write("**All Companies - Quarterly Data with Metrics:**")
         st.dataframe(quarterly_df[cols],width='stretch')
+
+    if ss.update_sec_data_btn==True:
+        st.rerun()
+
     print("at end of main funtion")
                 
 main()
