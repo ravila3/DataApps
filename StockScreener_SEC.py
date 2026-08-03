@@ -114,6 +114,7 @@ if "quarterly_financials" not in ss:
     ss.filter_sector = None
     ss.filter_inv_sector = None
     ss.filter_inv_industry = None
+    ss.filter_first_purchase_quarter = None
     ss.holding_period_group = None
     ss.sort_column = 'Consolidated_Score'
     ss.sort_direction = 'Desc'
@@ -2098,8 +2099,8 @@ def show_investment_returns():
     investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
     today = pd.Timestamp.today()
 
-    # Ensure date is Timestamp
-    investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
+    # Initial Investment Quarter
+    investment_returns_df['first_purchase_quarter'] = investment_returns_df['first_purchase_date'].dt.year.astype(str) + ' Q' + investment_returns_df['first_purchase_date'].dt.quarter.astype(str)
 
     # Months held
     investment_returns_df['months_held'] = (
@@ -2126,12 +2127,6 @@ def show_investment_returns():
         right=True
     )
 
-    investment_returns_df['holding_period_group'] = pd.Categorical(
-        investment_returns_df['holding_period_group'],
-        categories=labels,
-        ordered=True
-    )
-
     investment_returns_df['months_held'] = (
         round((today - investment_returns_df['first_purchase_date']).dt.days / 30,1)
     )
@@ -2148,9 +2143,10 @@ def show_investment_returns():
 
     col1, col2 = st.columns(2)
     with col1:
-        sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
+        first_purchase_quarter = st.selectbox("Filter by First Purchase Quarter", options=["All"] + investment_returns_df['first_purchase_quarter'].sort_values(ascending=False).unique().tolist(), key='temp_filter_first_purchase_quarter', on_change=update_primary_filter_session_value, args=("filter_first_purchase_quarter",))
         holding_period_group = st.selectbox("Filter by Holding Period", options=["All"] + investment_returns_df['holding_period_group'].cat.categories.tolist(), key='temp_filter_holding_period_group', on_change=update_primary_filter_session_value, args=("filter_holding_period_group",))
     with col2:
+        sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
         industry = st.selectbox("Filter by Industry", options=["All"] + industry_list, key='temp_filter_inv_industry', on_change=update_primary_filter_session_value, args=("filter_inv_industry",))
     
     if sector != "All":
@@ -2159,6 +2155,8 @@ def show_investment_returns():
         investment_returns_df = investment_returns_df[investment_returns_df['industry'] == ss.temp_filter_inv_industry]
     if holding_period_group != "All":
         investment_returns_df = investment_returns_df[investment_returns_df['holding_period_group'] == ss.temp_filter_holding_period_group]
+    if first_purchase_quarter != "All":
+        investment_returns_df = investment_returns_df[investment_returns_df['first_purchase_quarter'] == ss.temp_filter_first_purchase_quarter]
 
     # --- GROUPED TOTALS BY HOLDING PERIOD ---
     def investment_returns_by_slice(investment_returns_df, var_group_by):
@@ -2227,6 +2225,9 @@ def show_investment_returns():
     
     holding_period_totals = investment_returns_by_slice(investment_returns_df, 'holding_period_group')
     holding_period_totals = holding_period_totals.sort_values('holding_period_group')
+    
+    first_purchase_quarter_investment_totals = investment_returns_by_slice(investment_returns_df, 'first_purchase_quarter')
+    first_purchase_quarter_investment_totals = first_purchase_quarter_investment_totals.sort_values('first_purchase_quarter',ascending=False)
     
     investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
     sector_totals = investment_returns_by_slice(investment_returns_df, 'sector')
@@ -2334,7 +2335,7 @@ def show_investment_returns():
     investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
                                                 ,'current_holdings','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','total_return_pct'
                                                 ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
-                                                ,'first_purchase_date','sector','industry','avg_purchase_price','current_price']]
+                                                ,'first_purchase_date','first_purchase_quarter','sector','industry','avg_purchase_price','current_price']]
 
     def highlight_total_row(row):
         if row["company_and_ticker"] == "TOTAL":
@@ -2358,12 +2359,23 @@ def show_investment_returns():
                 )
     st.write("")
 
+    # Show totals by quarter of initial purchase
+    first_purchase_quarter_styled = (
+        first_purchase_quarter_investment_totals.style
+            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .format(fmt)
+    )
+    
+    st.write("### Totals by First Purchase Quarter")
+    st.dataframe(first_purchase_quarter_styled, column_config={"first_purchase_quarter": st.column_config.Column("First Purchase Quarter", width="medium", pinned=True)}, use_container_width=True)
+
     # Show totals by holding period group
     holding_period_totals_styled = (
         holding_period_totals.style
             .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
             .format(fmt)
     )
+    
     st.write("### Totals by Holding Period Group")
     st.dataframe(holding_period_totals_styled, column_config={"holding_period_group": st.column_config.Column("Holding Period Group", width="medium", pinned=True)}, use_container_width=True)
 
