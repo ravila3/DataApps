@@ -1525,15 +1525,16 @@ def write_sec_data_into_db(load_type):
         cutoff_90d_ago = datetime.now() - timedelta(days=90)
         cutoff_future = datetime.now() + timedelta(days=30)
         cutoff_recent_past = (datetime.now() - timedelta(days=7)).date()
-        cutoff_recent_future = (datetime.now() + timedelta(days=7)).date()
+        cutoff_recent_future = (datetime.now() + timedelta(days=1)).date()
 
         old_reports_df = stock_growth_analysis_df.loc[
             # last fiscal quarter too long ago and last filing date should have passed
             ((stock_growth_analysis_df['max_report_date'] < cutoff_90d_ago) &
             (stock_growth_analysis_df['max_report_date'] > (cutoff_90d_ago - timedelta(days=90))) &
             (stock_growth_analysis_df['last_filing_date'] < datetime.now() - timedelta(days=60)) &
-            ((stock_growth_analysis_df['next_earnings_date'] > datetime.now() - timedelta(days=60)) 
-            )) |
+            (stock_growth_analysis_df['next_earnings_date'] > datetime.now() + timedelta(days=60)) &
+            (stock_growth_analysis_df['last_earnings_date'] <= cutoff_recent_future)
+            ) |
             (
             # no next earnings date and last filing date older than 60 days
             (
@@ -2161,7 +2162,7 @@ def show_investment_returns():
 
     col1, col2 = st.columns(2)
     with col1:
-        first_purchase_quarter = st.selectbox("Filter by First Purchase Quarter", options=["All"] + investment_returns_df['first_purchase_quarter'].sort_values(ascending=False).unique().tolist(), key='temp_filter_first_purchase_quarter', on_change=update_primary_filter_session_value, args=("filter_first_purchase_quarter",))
+        first_purchase_quarter = st.selectbox("Filter by Quarter of First Purchase of the Stock", options=["All"] + investment_returns_df['first_purchase_quarter'].sort_values(ascending=False).unique().tolist(), key='temp_filter_first_purchase_quarter', on_change=update_primary_filter_session_value, args=("filter_first_purchase_quarter",))
         holding_period_group = st.selectbox("Filter by Holding Period", options=["All"] + investment_returns_df['holding_period_group'].cat.categories.tolist(), key='temp_filter_holding_period_group', on_change=update_primary_filter_session_value, args=("filter_holding_period_group",))
     with col2:
         sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
@@ -2384,7 +2385,7 @@ def show_investment_returns():
             .format(fmt)
     )
     
-    st.write("### Totals by First Purchase Quarter")
+    st.write("### Totals by Quarter of First Purchase of the Stock")
     st.dataframe(first_purchase_quarter_styled, column_config={"first_purchase_quarter": st.column_config.Column("First Purchase Quarter", width="medium", pinned=True)}, use_container_width=True)
 
     # Show totals by holding period group
