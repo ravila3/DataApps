@@ -2068,7 +2068,7 @@ def show_investment_returns():
     investment_returns_df = (
         buy_summary
         .merge(sell_summary, on=['cik', 'ticker', 'company_and_ticker'], how='left')
-        .fillna({'sold_quantity': 0, 'sold_amount': 0})
+        .fillna({'sold_quantity': 0.00, 'sold_amount': 0.00})
     )
     
     # Average purchase price
@@ -2638,7 +2638,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         
         ss.rankings_df[['curr_quantity']] = (
             ss.rankings_df[['curr_quantity']]
-            .fillna(0)
+            .fillna(0.00)
         )
         
         ss.rankings_df['sold_amount'] = ss.rankings_df['sold_amount'].fillna(0)
@@ -3016,7 +3016,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'category': st.column_config.SelectboxColumn(label="Category", help="Editable category for this stock", pinned=True, options=ss.categories_list, width=100),
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
-                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%,.0f', width="small"),
+                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.2f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
                 'sold_amount':st.column_config.NumberColumn(label="Sold Amount", help="Total Amount Sold", format='dollar', step='int', width="small"),
