@@ -129,7 +129,7 @@ if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
         "cik": None,
         "transaction_type": None,  # "Buy" or "Sell"
-        "quantity": 0,
+        "quantity": 0.00,
         "price": 0.00,
         "total_amount": 0.00
     }
@@ -1853,8 +1853,8 @@ def enter_stock_transaction():
                 action = st.selectbox("Action", ["Buy", "Sell"])
 
             with col2:
-                quantity = st.number_input("Quantity", min_value=1, step=1)
-                price = st.number_input("Price per Share", min_value=0.00, step=0.01, format="%.2f")
+                quantity = st.number_input("Quantity", min_value=1.00, format="%.2f")
+                price = st.number_input("Price per Share", min_value=0.0000, format="%.2f")
 
             submit_add = st.form_submit_button("Add Transaction")
 
@@ -1893,7 +1893,7 @@ def enter_stock_transaction():
         ss.transaction_df,
         num_rows="dynamic",
         column_config= {
-            'quantity': st.column_config.NumberColumn(label="Quantity", step='int'),
+            'quantity': st.column_config.NumberColumn(label="Quantity", format='%.2f'),
             'price': st.column_config.NumberColumn(label="Price", format='dollar'),
             'total': st.column_config.NumberColumn(label="Total Amount", format='dollar')
             },
@@ -2184,6 +2184,7 @@ def show_investment_returns():
                 .groupby(var_group_by, dropna=False)
                 .agg({
                     'purchase_amount': 'sum',
+                    'sold_amount': 'sum',
                     'current_holdings_value': 'sum',
                     'total_gains': 'sum',
                     'realized_gains': 'sum',
@@ -2279,7 +2280,7 @@ def show_investment_returns():
     ] = portfolio_total_return
     
     # Columns to remove
-    cols_to_remove = ["cik", "sold_quantity", "sold_amount", "avg_sold_price"]
+    cols_to_remove = ["cik", "sold_quantity", "avg_sold_price"]
     investment_returns_df = investment_returns_df.drop(columns=cols_to_remove, errors="ignore")
     
     # --- STYLING ---
@@ -2300,7 +2301,7 @@ def show_investment_returns():
     # Column groups
     quantity_cols = ["purchase_quantity", "current_holdings"]
     price_cols    = ["avg_purchase_price", "current_price"]
-    amount_cols   = ["purchase_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
+    amount_cols   = ["purchase_amount", "sold_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
     percent_cols  = ["total_return_pct","Pct_Chg_from_7_Days_Ago"]
 
     # Format dictionary
@@ -2351,7 +2352,7 @@ def show_investment_returns():
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
-    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount'
+    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount','sold_amount'
                                                 ,'current_holdings','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','total_return_pct'
                                                 ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
                                                 ,'first_purchase_date','first_purchase_quarter','sector','industry','avg_purchase_price','current_price']]
@@ -2504,16 +2505,16 @@ def transaction_show_modal():
     # td["cik"]=cik
     td["date"] = st.date_input("Trade Date:", value=date.today(), key="transaction_modal.date")
     td["transaction_type"] = st.radio("Buy or Sell", options=['Buy','Sell'], key="transaction_modal.transaction_type")
-    td["quantity"] = st.number_input("Number of Shares", min_value=0, step=1, key="transaction_modal.quantity")
-    td["price"] = st.number_input("Price", min_value=0.0, key="transaction_modal.price")
+    td["quantity"] = st.number_input("Number of Shares", min_value=0.00, key="transaction_modal.quantity")
+    td["price"] = st.number_input("Price", min_value=0.0000, key="transaction_modal.price")
     td["total_amount"] = float(td["quantity"]) * float(td["price"])
     st.write(f"**Total amount:** ${td['total_amount']:.2f}")
     
     if st.button("Save"):
-        if td["quantity"] <= 0:
+        if td["quantity"] <= 0.0:
             st.error("Quantity must be greater than 0")
             return
-        if td["price"] <= 0:
+        if td["price"] <= 0.0:
             st.error("Price must be greater than 0")
             return
 
@@ -2523,7 +2524,7 @@ def transaction_show_modal():
             "date": td["date"],
             "company_and_ticker": td["company_and_ticker"],
             "action": td["transaction_type"],  # 'buy' or 'sell'
-            "quantity": int(td["quantity"]),
+            "quantity": float(td["quantity"]),
             "price": float(td["price"]),
             "total": float(td["total_amount"])
         }
@@ -2538,7 +2539,7 @@ def transaction_show_modal():
             st.toast("Wrote transaction to DB successfully")
         except Exception as e:
             st.error(f"Failed to write transaction to postgress: {e}")
-
+        
         ss.transaction_show_modal=False
         st.rerun()
         # optionally close by rerunning main app logic
