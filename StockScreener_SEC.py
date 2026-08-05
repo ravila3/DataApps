@@ -124,6 +124,8 @@ if "quarterly_financials" not in ss:
     ss.compute_value_show_df = False
     ss.user_id = None
     ss.update_sec_data_btn=False
+    ss.rerun_app=False
+
 
 if "transaction_modal" not in ss:
     ss["transaction_modal"] = {
@@ -167,6 +169,7 @@ def reset_forms_ss_vars():
     ss.apply_scores_requested=False
     ss.apply_scores_done=False
     ss.update_sec_data_btn=False
+    ss.rerun_app=False
     return
 
 def safe_divide(a, b=1):
@@ -2868,7 +2871,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     else:
         columns = ['chart','action']+[c for c in columns]
     
-    # ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
+    if ss.rerun_app==True:
+        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
+        ss.rerun_app=False
     # st.write(f"ss.sort_column={ss.sort_column}") #ss.editable_stock_growth_analysis_df) #debug
         
     # st.write(ss.editable_stock_growth_analysis_df) #debug
@@ -3292,6 +3297,7 @@ def main():
         st.subheader("Updating SEC data, please wait...")
         write_sec_data_into_db('single')
         print("updated SEC data, rerunning app")
+        ss.rerun_app=True
         st.rerun()
     
     if ss.hide_menu==False:
