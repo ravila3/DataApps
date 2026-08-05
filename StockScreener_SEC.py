@@ -2312,7 +2312,7 @@ def show_investment_returns():
 
     # Quantities → comma integers
     for col in quantity_cols:
-        fmt[col] = lambda v: f"{v:,.0f}" if pd.notna(v) and isinstance(v, (int, float)) else v
+        fmt[col] = lambda v: f"{v:,.2f}" if pd.notna(v) and isinstance(v, (int, float)) else v
 
     # months_held to single decimal
     fmt['months_held'] = lambda v: f"{v:,.1f}" if pd.notna(v) and isinstance(v, (int, float)) else v
