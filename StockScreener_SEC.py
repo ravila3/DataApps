@@ -2558,7 +2558,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','curr_value','gain_pct', # 'price_range_52wks',
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','sold_amount','curr_value','gain_pct', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
@@ -2607,8 +2607,17 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             .rename(columns={'total': 'buy_amount'})
         )
 
+        sold_amounts = (
+            tx[tx['action'] == 'sell']
+            .groupby('cik', as_index=False)['total']
+            .sum()
+            .rename(columns={'total': 'sold_amount'})
+        )
+
         agg = agg.merge(buy_amounts, on='cik', how='left')
         agg['buy_amount'] = agg['buy_amount'] #.fillna(0)
+        agg = agg.merge(sold_amounts, on='cik', how='left')
+        agg['sold_amount'] = agg['sold_amount'] #.fillna(0)
 
         # Ensure both columns exist (in case there were only buys or only sells)
         for col in ('buy_quantity', 'sell_quantity'):
@@ -2629,10 +2638,12 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             .fillna(0)
         )
         
+        ss.rankings_df['sold_amount'] = ss.rankings_df['sold_amount'].fillna(0)
         ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
         ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['buy_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
         ss.rankings_df['gain_pct']=((ss.rankings_df['stock_price']-ss.rankings_df['avg_cost'])/ss.rankings_df['avg_cost'])*100
 
+        # st.write("ss.rankings_df",ss.rankings_df) #debug
         # st.write(f"the len(ss.rankings_df) is {len(ss.rankings_df)}") #debug
 
         editable_stock_data=read_or_create_editable_table()
@@ -3003,6 +3014,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%,.0f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
+                'sold_amount':st.column_config.NumberColumn(label="Sold Amount", help="Total Amount Sold", format='dollar', step='int', width="small"),
                 'curr_value':st.column_config.NumberColumn(label="Curr Value", help="Current Value of Holdings", format='dollar', step='int', width="small"),
                 'gain_pct': st.column_config.NumberColumn(label="Gain %", help="Total Gain Percentage on holdings", format='%.1f', width="small"),
                 # 'price_range_52wks': st.column_config.TextColumn(),
