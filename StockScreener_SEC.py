@@ -822,8 +822,8 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
         st.markdown("""
             <style>
                 [data-testid="stColumn"] {
-                    flex: 1 1 500px; 
-                    min-width: 500px;
+                    flex: 1 1 300px; 
+                    min-width: 300px;
                 }
                 .centered-title {
                     text-align: center;
