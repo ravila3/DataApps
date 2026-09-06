@@ -2071,6 +2071,153 @@ def show_investment_returns():
         .fillna({'sold_quantity': 0.00, 'sold_amount': 0.00})
     )
     
+    # # Calculate APR accurately ########################################################################
+
+    # # 1. Ensure dates are datetime objects and sort chronologically
+    # transaction_profit_df['date'] = pd.to_datetime(transaction_profit_df['date'])
+    # df_sorted = transaction_profit_df.sort_values('date').copy()
+
+    # # 2. Separate buys and sells
+    # buys = df_sorted[df_sorted['action'] == 'Buy'].copy()
+    # sells = df_sorted[df_sorted['action'] == 'Sell'].copy()
+
+    # # Track running inventory for buys
+    # buys['remaining_qty'] = buys['quantity']
+
+    # # List to store results for each sell transaction
+    # sell_records = []
+
+    # # 3. Process each sell chronologically to match against buy inventory (FIFO)
+    # for _, sell in sells.iterrows():
+    #     ticker_match = (buys['ticker'] == sell['ticker']) & (buys['cik'] == sell['cik'])
+    #     available_buys = buys[ticker_match & (buys['remaining_qty'] > 0) & (buys['date'] <= sell['date'])]
+        
+    #     qty_to_match = sell['quantity']
+    #     total_cost_basis = 0.0
+    #     weighted_days = 0.0
+        
+    #     for buy_idx, buy in available_buys.iterrows():
+    #         if qty_to_match <= 0:
+    #             break
+                
+    #         # Determine how many shares to take from this buy bucket
+    #         taken_qty = min(qty_to_match, buy['remaining_qty'])
+            
+    #         # Calculate cost basis for this chunk
+    #         buy_unit_price = buy['total'] / buy['quantity']
+    #         chunk_cost = taken_qty * buy_unit_price
+    #         total_cost_basis += chunk_cost
+            
+    #         # Calculate holding period for this chunk
+    #         holding_days = max((sell['date'] - buy['date']).days, 1)
+    #         weighted_days += holding_days * chunk_cost
+            
+    #         # Update remaining inventory in the main buys DataFrame
+    #         buys.at[buy_idx, 'remaining_qty'] -= taken_qty
+    #         qty_to_match -= taken_qty
+            
+    #     # Prevent division by zero if matching bugs out or data is missing
+    #     avg_holding_days = (weighted_days / total_cost_basis) if total_cost_basis > 0 else 1
+        
+    #     sell_records.append({
+    #         'cik': sell['cik'],
+    #         'ticker': sell['ticker'],
+    #         'company_and_ticker': sell['company_and_ticker'],
+    #         'sector': sell['sector'],
+    #         'industry': sell['industry'],
+    #         'sold_quantity': sell['quantity'],
+    #         'sold_amount': sell['total'],
+    #         'cost_basis': total_cost_basis,
+    #         'avg_holding_days': avg_holding_days
+    #     })
+
+    # # 4. Create the detailed realized sales DataFrame
+    # realized_sells_df = pd.DataFrame(sell_records)
+
+    # # 5. Aggregate realized sales to the company level
+    # agg_df = realized_sells_df.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
+    #     sold_quantity=('sold_quantity', 'sum'),
+    #     sold_amount=('sold_amount', 'sum'),
+    #     cost_basis=('cost_basis', 'sum'),
+    #     # Weight holding days by the cost basis of each sale
+    #     holding_days=('avg_holding_days', lambda x: np.average(x, weights=realized_sells_df.loc[x.index, 'cost_basis']) if realized_sells_df.loc[x.index, 'cost_basis'].sum() > 0 else 1),
+    #     sector=('sector', 'first'),
+    #     industry=('industry', 'first')
+    # ).reset_index()
+
+    # # 6. Calculate Final Metrics & Aggregate APR
+    # agg_df['total_profit'] = agg_df['sold_amount'] - agg_df['cost_basis']
+    # agg_df['return_pct'] = agg_df['total_profit'] / agg_df['cost_basis']
+
+    # # Simple APR formula adjusted for holding duration
+    # agg_df['aggregate_apr'] = agg_df['return_pct'] * (365 / agg_df['holding_days'])
+
+    # # Example dictionary of current market prices. Replace with your live pricing data.
+    # current_prices = {
+    #     'AAPL': 185.00,
+    #     'MSFT': 420.00,
+    #     'NVDA': 900.00
+    # }
+
+    # # Filter to get only the remaining open positions
+    # open_positions = buys[buys['remaining_qty'] > 0].copy()
+
+    # # Calculate the cost basis for remaining shares
+    # open_positions['remaining_cost_basis'] = open_positions['remaining_qty'] * (open_positions['total'] / open_positions['quantity'])
+
+    # # Map current market prices to calculate current value
+    # open_positions['current_price'] = open_positions['ticker'].map(current_prices)
+    # # Fallback to original purchase price if current price is missing to prevent breaking calculations
+    # open_positions['current_price'] = open_positions['current_price'].fillna(open_positions['total'] / open_positions['quantity'])
+
+    # open_positions['current_value'] = open_positions['remaining_qty'] * open_positions['current_price']
+    # open_positions['unrealized_profit'] = open_positions['current_value'] - open_positions['remaining_cost_basis']
+
+    # # Calculate holding days for open positions up to today (Aug 21, 2026)
+    # today = pd.to_datetime('2026-08-21')
+    # open_positions['holding_days'] = (today - open_positions['date']).dt.days.clip(lower=1)
+
+    # # --- 3. AGGREGATE BOTH SIDES TO GET TOTAL PORTFOLIO PERFORMANCE ---
+
+    # # Aggregate Realized Data (from sell_records)
+    # realized_sells_df = pd.DataFrame(sell_records)
+    # if not realized_sells_df.empty:
+    #     realized_agg = realized_sells_df.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
+    #         realized_profit=('total_profit', 'sum'),
+    #         realized_cost_basis=('cost_basis', 'sum'),
+    #         realized_holding_days=('avg_holding_days', lambda x: np.average(x, weights=realized_sells_df.loc[x.index, 'cost_basis']) if realized_sells_df.loc[x.index, 'cost_basis'].sum() > 0 else 1)
+    #     ).reset_index()
+    # else:
+    #     realized_agg = pd.DataFrame(columns=['cik', 'ticker', 'company_and_ticker', 'realized_profit', 'realized_cost_basis', 'realized_holding_days'])
+
+    # # Aggregate Unrealized Data
+    # unrealized_agg = open_positions.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
+    #     unrealized_profit=('unrealized_profit', 'sum'),
+    #     unrealized_cost_basis=('remaining_cost_basis', 'sum'),
+    #     unrealized_holding_days=('holding_days', lambda x: np.average(x, weights=open_positions.loc[x.index, 'remaining_cost_basis']) if open_positions.loc[x.index, 'remaining_cost_basis'].sum() > 0 else 1)
+    # ).reset_index()
+
+    # # --- 4. COMBINE REALIZED AND UNREALIZED INTO TOTAL RETURN ---
+    # total_perf_df = pd.merge(realized_agg, unrealized_agg, on=['cik', 'ticker', 'company_and_ticker'], how='outer').fillna(0)
+
+    # # Calculate Total Cost Basis and Total Profit
+    # total_perf_df['total_cost_basis'] = total_perf_df['realized_cost_basis'] + total_perf_df['unrealized_cost_basis']
+    # total_perf_df['total_profit'] = total_perf_df['realized_profit'] + total_perf_df['unrealized_profit']
+
+    # # Calculate Blended Return %
+    # total_perf_df['total_return_pct'] = total_perf_df['total_profit'] / total_perf_df['total_cost_basis']
+
+    # # Blended Holding Period (weighted by cost basis)
+    # total_perf_df['blended_holding_days'] = (
+    #     (total_perf_df['realized_holding_days'] * total_perf_df['realized_cost_basis']) +
+    #     (total_perf_df['unrealized_holding_days'] * total_perf_df['unrealized_cost_basis'])
+    # ) / total_perf_df['total_cost_basis']
+    # total_perf_df['blended_holding_days'] = total_perf_df['blended_holding_days'].replace(0, 1).fillna(1)
+
+    # # Calculate Total Aggregate APR (Realized + Unrealized)
+    # total_perf_df['total_apr'] = total_perf_df['total_return_pct'] * (365 / total_perf_df['blended_holding_days'])
+
+    ########################################################################################
     # Average purchase price
     investment_returns_df['avg_purchase_price'] = (
         investment_returns_df['purchase_amount'] /
@@ -3092,14 +3239,14 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 # set page config and title
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
-# st.markdown("""
-#    <script>
-#        var meta = document.createElement('meta');
-#        meta.name = "viewport";
-#        meta.content = "width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes";
-#        document.getElementsByTagName('head')[0].appendChild(meta);
-#    </script>
-# """, unsafe_allow_html=True)
+st.markdown("""
+   <script>
+       var meta = document.createElement('meta');
+       meta.name = "viewport";
+       meta.content = "width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes";
+       document.getElementsByTagName('head')[0].appendChild(meta);
+   </script>
+""", unsafe_allow_html=True)
 
 # Kill floating tooltips 
 
