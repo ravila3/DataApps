@@ -3239,14 +3239,14 @@ def display_stock_analysis_form(stock_growth_analysis_df):
 # set page config and title
 st.set_page_config(page_title="Stock Screener", layout="wide")
 
-st.markdown("""
-   <script>
-       var meta = document.createElement('meta');
-       meta.name = "viewport";
-       meta.content = "width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes";
-       document.getElementsByTagName('head')[0].appendChild(meta);
-   </script>
-""", unsafe_allow_html=True)
+# st.markdown("""
+#    <script>
+#        var meta = document.createElement('meta');
+#        meta.name = "viewport";
+#        meta.content = "width=device-width, initial-scale=0.85, maximum-scale=1.0, user-scalable=yes";
+#        document.getElementsByTagName('head')[0].appendChild(meta);
+#    </script>
+# """, unsafe_allow_html=True)
 
 # Kill floating tooltips 
 
