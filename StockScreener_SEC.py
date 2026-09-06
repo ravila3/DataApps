@@ -285,7 +285,7 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     chart = (
         line + points + rule + ma_line + reg_line + touch_area #+ selectors
     ).properties(
-        # width=800,
+        width="container",
         # height=400,
         title=alt.TitleParams(
             f"{var_name.replace('_', ' ')} Regression for {name}",
