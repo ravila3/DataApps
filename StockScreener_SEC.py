@@ -285,8 +285,8 @@ def plot_regression_line(name, var_name, X, y, y_pred_plot, slope, r2, end_date,
     chart = (
         line + points + rule + ma_line + reg_line + touch_area #+ selectors
     ).properties(
-        # width="container",
-        height=400,
+        width="container",
+        height=220,
         title=alt.TitleParams(
             f"{var_name.replace('_', ' ')} Regression for {name}",
             anchor="middle"
@@ -836,7 +836,7 @@ def analyze_yoy_growth(quarterly_df, name, plot_regression_bin):
             
         if plot_regression_bin==1:
             try:
-                chart_col1, chart_col2, chart_col3 = st.columns(3, gap='xxsmall')
+                chart_col1, chart_col2, chart_col3 = st.columns(3, gap='small', wrap=False)
                 if chart_revenue is not None:
                     with chart_col1:
                         # st.markdown(f'<p class="centered-title">Income Statement {name}</p>', unsafe_allow_html=True)
