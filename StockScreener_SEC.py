@@ -10,7 +10,7 @@ from altair.expr import *
 from SEC_Edgar_Loader import sec_edgar_financial_load,get_company_tickers_df, load_daily_SEC_submission_index
 import numpy as np
 import sys, linecache, traceback
-from stock_data_loader_utilities import postgres_update_bulk, postgres_read,yahoo_finance_load,yahoo_finance_df_format
+from stock_data_loader_utilities import postgres_update_bulk, postgres_read,yahoo_finance_load,yahoo_finance_df_format,write_snowflake_data
 from datetime import date
 import uuid
 import math
@@ -124,6 +124,7 @@ if "quarterly_financials" not in ss:
     ss.compute_value_show_df = False
     ss.user_id = None
     ss.update_sec_data_btn=False
+    ss.write_data_to_snowflake_btn=False
     ss.rerun_app=False
 
 
@@ -3430,7 +3431,7 @@ def main():
 # enable multiple users - completed 6/8/26
 # Add volume to stock analysis view - completed 6/10/26
 
-    calc_new_score_btn = load_full_sec_btn = load_incremental_sec_btn = admin_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = False
+    calc_new_score_btn = load_full_sec_btn = load_incremental_sec_btn = admin_btn = investment_returns_btn = process_yahoo_and_stats_btn = view_stock_analysis_form_btn = qtr_data_btn = return_menu_btn = write_data_to_snowflake_btn = False
 
     params = st.query_params
     ss.user_id = params.get("user_id", "default")
@@ -3455,6 +3456,8 @@ def main():
             load_incremental_sec_btn = st.button("Load Incremental Financial Data from SEC (All Companies)")
         with color_button("green"):
             investment_returns_btn = st.button("Show Investment Returns")
+        with color_button("blue"):
+            write_data_to_snowflake_btn = st.button("Write data to Snowflake (for external analysis)")
         if ss.admin_buttons==False:
             with color_button("red"):
                 admin_btn=st.button("Show ADMIN Options")
@@ -3487,6 +3490,34 @@ def main():
 
     if ss.compute_value_score==True and ss.view_stock_analysis_form==False:
         compute_value_score_on_df(show_df=True)
+        
+    if write_data_to_snowflake_btn==True:
+        table_name='stock_growth_analysis_results_merged'
+        df=postgres_read('stock_growth_analysis_results_merged')
+
+        snowflake_type_map = {
+            "int64": "NUMBER",
+            "float64": "FLOAT",
+            "bool": "BOOLEAN",
+            "datetime64[ns]": "TIMESTAMP_NTZ",
+            "object": "VARCHAR",
+        }
+
+        def infer_snowflake_type(dtype):
+            return snowflake_type_map.get(str(dtype), "VARCHAR")
+
+        column_defs = [
+            f"{col} {infer_snowflake_type(dtype)}"
+            for col, dtype in df.dtypes.items()
+        ]
+
+        create_table_query = f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                {", ".join(column_defs)}
+            );
+        """
+        write_snowflake_data(df,table_name,create_table_query)
+        st.write("Data written to Snowflake successfully")
 
     if view_stock_analysis_form_btn:
         reset_forms_ss_vars()
