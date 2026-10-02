@@ -2988,7 +2988,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 selected_datetime = selected_datetime[0] if len(selected_datetime) > 0 else None
             mask &= (ss.editable_stock_growth_analysis_df['last_filing_date'] >= selected_datetime)
     
-    sort_columns=['Consolidated_Score','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago', 'industry', 'sector',
+    sort_columns=['Consolidated_Score','Pct_Chg_from_7_Days_Ago','Pct_Chg_from_52_Wk_High','curr_value','gain_pct', 'industry', 'sector',
         'Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
         'last_filing_date','last_earnings_date','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
