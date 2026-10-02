@@ -2709,7 +2709,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','sold_amount','curr_value','gain_pct', # 'price_range_52wks',
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','buy_amount','sold_amount','curr_value','gain_pct', # 'price_range_52wks',
         'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
@@ -2788,7 +2788,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             ss.rankings_df[['curr_quantity']]
             .fillna(0.00)
         )
-        
+        ss.rankings_df['buy_amount'] = ss.rankings_df['buy_amount'].fillna(0)
         ss.rankings_df['sold_amount'] = ss.rankings_df['sold_amount'].fillna(0)
         ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
         ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['buy_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
@@ -2988,7 +2988,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 selected_datetime = selected_datetime[0] if len(selected_datetime) > 0 else None
             mask &= (ss.editable_stock_growth_analysis_df['last_filing_date'] >= selected_datetime)
     
-    sort_columns=['Consolidated_Score','Pct_Chg_from_7_Days_Ago','Pct_Chg_from_52_Wk_High','curr_value','gain_pct', 'industry', 'sector',
+    sort_columns=['Consolidated_Score','Pct_Chg_from_7_Days_Ago','Pct_Chg_from_52_Wk_High','buy_amount','curr_value','gain_pct', 'industry', 'sector',
         'Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
         'last_filing_date','last_earnings_date','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
@@ -3167,6 +3167,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.2f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
+                'buy_amount':st.column_config.NumberColumn(label="Buy Amount", help="Total Amount Bought", format='dollar', step='int', width="small"),
                 'sold_amount':st.column_config.NumberColumn(label="Sold Amount", help="Total Amount Sold", format='dollar', step='int', width="small"),
                 'curr_value':st.column_config.NumberColumn(label="Curr Value", help="Current Value of Holdings", format='dollar', step='int', width="small"),
                 'gain_pct': st.column_config.NumberColumn(label="Gain %", help="Total Gain Percentage on holdings", format='%.1f', width="small"),
