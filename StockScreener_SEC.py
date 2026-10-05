@@ -2792,7 +2792,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         ss.rankings_df['sold_amount'] = ss.rankings_df['sold_amount'].fillna(0)
         ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
         ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['buy_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
-        ss.rankings_df['gain_pct']=((ss.rankings_df['sold_amount']+ss.rankings_df['curr_value'])/ss.rankings_df['buy_amount'])*100
+        ss.rankings_df['gain_pct']=((ss.rankings_df['sold_amount']+ss.rankings_df['curr_value'])/ss.rankings_df['buy_amount'])*100-100
 
         ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(0.01, 5000), 'buy_category'] = 'Speculative'
         ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(5000.01, 20000), 'buy_category'] = 'Moderate_Investment'
