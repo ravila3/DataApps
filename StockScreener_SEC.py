@@ -1721,6 +1721,15 @@ def load_stock_growth_analysis_data_from_db():
     # df_pretty=df.rename(columns={pg_col: pg_to_pretty.get(pg_col, pg_col) for pg_col in df.columns})
     return df #, companies_data
 
+def load_stock_growth_analysis_merged_view_from_db():
+    status = st.empty()
+    df = postgres_read('stock_growth_analysis_results_merged')
+    # st.dataframe(df)  # debug
+    # column_specs=get_column_specs_results_df()
+    # pg_to_pretty = {v["pg_name"]: k for k, v in column_specs.items()}
+    # df_pretty=df.rename(columns={pg_col: pg_to_pretty.get(pg_col, pg_col) for pg_col in df.columns})
+    return df #, companies_data
+
 def load_stock_transactions_from_db(user_id):
     status = st.empty()
     df = postgres_read('stock_transactions')
@@ -1748,7 +1757,8 @@ def read_or_create_editable_table():
             'ticker': ss.rankings_df['ticker'],
             'company_and_ticker': ss.rankings_df['company_and_ticker'],
             'category': [''] * len(ss.rankings_df),
-            'notes': [''] * len(ss.rankings_df)
+            'notes': [''] * len(ss.rankings_df),
+            'investment_category':[''] * len(ss.rankings_df)
         })
 
         # st.write(editable_df)  # debug
@@ -2012,271 +2022,8 @@ def show_investment_returns():
         return
     
     ss.rankings_df = load_stock_growth_analysis_data_from_db()
+    ss.rankings_view_df = load_stock_growth_analysis_merged_view_from_db()
     
-    # with st.expander("Expand to show filters", key="temp_filters_expanded", on_change=update_primary_filter_session_value, args=("filters_expanded",)):
-        # col1, col2 = st.columns(2)
-        # with col1:
-        #     start_date = st.date_input("Start Date", key='temp_filter_start_date', on_change=update_primary_filter_session_value, args=("filter_start_date",))
-    
-    transaction_profit_df = ss.transaction_df.merge(
-        ss.rankings_df[['cik', 'ticker', 'stock_price','sector','industry']], on='cik', how='left'
-        ).rename(columns={'stock_price': 'current_price'})
-
-    sector_df = (transaction_profit_df
-                .groupby('sector', dropna=False)
-                .agg({'total': 'sum'})
-                .reset_index()
-                .sort_values('total', ascending=False)
-                )
-    sector_list=sector_df['sector'].tolist()
-
-    industry_df = (transaction_profit_df
-                .groupby('industry', dropna=False)
-                .agg({'total': 'sum'})
-                .reset_index()
-                .sort_values('total', ascending=False)
-                )
-    industry_list=industry_df['industry'].tolist()
-    
-    # --- Build investment_returns_df from transaction_df and rankings_df ---
-
-    # Split buys and sells
-    buys  = transaction_profit_df[transaction_profit_df['action'] == 'Buy'].copy()
-    sells = transaction_profit_df[transaction_profit_df['action'] == 'Sell'].copy()
-
-    buys['purchase_quantity'] = buys['quantity']
-    buys['purchase_amount']   = buys['total']
-
-    sells['sold_quantity'] = sells['quantity']
-    sells['sold_amount']   = sells['total']
-
-    # Aggregate buys
-    buy_summary = buys.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
-        purchase_quantity=('purchase_quantity', 'sum'),
-        purchase_amount=('purchase_amount', 'sum'),
-        first_purchase_date=('date', 'min'), # needed for returns
-        sector=('sector', 'first'), # for filtering and analysis
-        industry=('industry', 'first') # for filtering and analysis
-    ).reset_index()
-
-    # Aggregate sells
-    sell_summary = sells.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
-        sold_quantity=('sold_quantity', 'sum'),
-        sold_amount=('sold_amount', 'sum')
-    ).reset_index()
-
-    # Merge buy + sell summaries
-    investment_returns_df = (
-        buy_summary
-        .merge(sell_summary, on=['cik', 'ticker', 'company_and_ticker'], how='left')
-        .fillna({'sold_quantity': 0.00, 'sold_amount': 0.00})
-    )
-    
-    # # Calculate APR accurately ########################################################################
-
-    # # 1. Ensure dates are datetime objects and sort chronologically
-    # transaction_profit_df['date'] = pd.to_datetime(transaction_profit_df['date'])
-    # df_sorted = transaction_profit_df.sort_values('date').copy()
-
-    # # 2. Separate buys and sells
-    # buys = df_sorted[df_sorted['action'] == 'Buy'].copy()
-    # sells = df_sorted[df_sorted['action'] == 'Sell'].copy()
-
-    # # Track running inventory for buys
-    # buys['remaining_qty'] = buys['quantity']
-
-    # # List to store results for each sell transaction
-    # sell_records = []
-
-    # # 3. Process each sell chronologically to match against buy inventory (FIFO)
-    # for _, sell in sells.iterrows():
-    #     ticker_match = (buys['ticker'] == sell['ticker']) & (buys['cik'] == sell['cik'])
-    #     available_buys = buys[ticker_match & (buys['remaining_qty'] > 0) & (buys['date'] <= sell['date'])]
-        
-    #     qty_to_match = sell['quantity']
-    #     total_cost_basis = 0.0
-    #     weighted_days = 0.0
-        
-    #     for buy_idx, buy in available_buys.iterrows():
-    #         if qty_to_match <= 0:
-    #             break
-                
-    #         # Determine how many shares to take from this buy bucket
-    #         taken_qty = min(qty_to_match, buy['remaining_qty'])
-            
-    #         # Calculate cost basis for this chunk
-    #         buy_unit_price = buy['total'] / buy['quantity']
-    #         chunk_cost = taken_qty * buy_unit_price
-    #         total_cost_basis += chunk_cost
-            
-    #         # Calculate holding period for this chunk
-    #         holding_days = max((sell['date'] - buy['date']).days, 1)
-    #         weighted_days += holding_days * chunk_cost
-            
-    #         # Update remaining inventory in the main buys DataFrame
-    #         buys.at[buy_idx, 'remaining_qty'] -= taken_qty
-    #         qty_to_match -= taken_qty
-            
-    #     # Prevent division by zero if matching bugs out or data is missing
-    #     avg_holding_days = (weighted_days / total_cost_basis) if total_cost_basis > 0 else 1
-        
-    #     sell_records.append({
-    #         'cik': sell['cik'],
-    #         'ticker': sell['ticker'],
-    #         'company_and_ticker': sell['company_and_ticker'],
-    #         'sector': sell['sector'],
-    #         'industry': sell['industry'],
-    #         'sold_quantity': sell['quantity'],
-    #         'sold_amount': sell['total'],
-    #         'cost_basis': total_cost_basis,
-    #         'avg_holding_days': avg_holding_days
-    #     })
-
-    # # 4. Create the detailed realized sales DataFrame
-    # realized_sells_df = pd.DataFrame(sell_records)
-
-    # # 5. Aggregate realized sales to the company level
-    # agg_df = realized_sells_df.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
-    #     sold_quantity=('sold_quantity', 'sum'),
-    #     sold_amount=('sold_amount', 'sum'),
-    #     cost_basis=('cost_basis', 'sum'),
-    #     # Weight holding days by the cost basis of each sale
-    #     holding_days=('avg_holding_days', lambda x: np.average(x, weights=realized_sells_df.loc[x.index, 'cost_basis']) if realized_sells_df.loc[x.index, 'cost_basis'].sum() > 0 else 1),
-    #     sector=('sector', 'first'),
-    #     industry=('industry', 'first')
-    # ).reset_index()
-
-    # # 6. Calculate Final Metrics & Aggregate APR
-    # agg_df['total_profit'] = agg_df['sold_amount'] - agg_df['cost_basis']
-    # agg_df['return_pct'] = agg_df['total_profit'] / agg_df['cost_basis']
-
-    # # Simple APR formula adjusted for holding duration
-    # agg_df['aggregate_apr'] = agg_df['return_pct'] * (365 / agg_df['holding_days'])
-
-    # # Example dictionary of current market prices. Replace with your live pricing data.
-    # current_prices = {
-    #     'AAPL': 185.00,
-    #     'MSFT': 420.00,
-    #     'NVDA': 900.00
-    # }
-
-    # # Filter to get only the remaining open positions
-    # open_positions = buys[buys['remaining_qty'] > 0].copy()
-
-    # # Calculate the cost basis for remaining shares
-    # open_positions['remaining_cost_basis'] = open_positions['remaining_qty'] * (open_positions['total'] / open_positions['quantity'])
-
-    # # Map current market prices to calculate current value
-    # open_positions['current_price'] = open_positions['ticker'].map(current_prices)
-    # # Fallback to original purchase price if current price is missing to prevent breaking calculations
-    # open_positions['current_price'] = open_positions['current_price'].fillna(open_positions['total'] / open_positions['quantity'])
-
-    # open_positions['current_value'] = open_positions['remaining_qty'] * open_positions['current_price']
-    # open_positions['unrealized_profit'] = open_positions['current_value'] - open_positions['remaining_cost_basis']
-
-    # # Calculate holding days for open positions up to today (Aug 21, 2026)
-    # today = pd.to_datetime('2026-08-21')
-    # open_positions['holding_days'] = (today - open_positions['date']).dt.days.clip(lower=1)
-
-    # # --- 3. AGGREGATE BOTH SIDES TO GET TOTAL PORTFOLIO PERFORMANCE ---
-
-    # # Aggregate Realized Data (from sell_records)
-    # realized_sells_df = pd.DataFrame(sell_records)
-    # if not realized_sells_df.empty:
-    #     realized_agg = realized_sells_df.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
-    #         realized_profit=('total_profit', 'sum'),
-    #         realized_cost_basis=('cost_basis', 'sum'),
-    #         realized_holding_days=('avg_holding_days', lambda x: np.average(x, weights=realized_sells_df.loc[x.index, 'cost_basis']) if realized_sells_df.loc[x.index, 'cost_basis'].sum() > 0 else 1)
-    #     ).reset_index()
-    # else:
-    #     realized_agg = pd.DataFrame(columns=['cik', 'ticker', 'company_and_ticker', 'realized_profit', 'realized_cost_basis', 'realized_holding_days'])
-
-    # # Aggregate Unrealized Data
-    # unrealized_agg = open_positions.groupby(['cik', 'ticker', 'company_and_ticker']).agg(
-    #     unrealized_profit=('unrealized_profit', 'sum'),
-    #     unrealized_cost_basis=('remaining_cost_basis', 'sum'),
-    #     unrealized_holding_days=('holding_days', lambda x: np.average(x, weights=open_positions.loc[x.index, 'remaining_cost_basis']) if open_positions.loc[x.index, 'remaining_cost_basis'].sum() > 0 else 1)
-    # ).reset_index()
-
-    # # --- 4. COMBINE REALIZED AND UNREALIZED INTO TOTAL RETURN ---
-    # total_perf_df = pd.merge(realized_agg, unrealized_agg, on=['cik', 'ticker', 'company_and_ticker'], how='outer').fillna(0)
-
-    # # Calculate Total Cost Basis and Total Profit
-    # total_perf_df['total_cost_basis'] = total_perf_df['realized_cost_basis'] + total_perf_df['unrealized_cost_basis']
-    # total_perf_df['total_profit'] = total_perf_df['realized_profit'] + total_perf_df['unrealized_profit']
-
-    # # Calculate Blended Return %
-    # total_perf_df['total_return_pct'] = total_perf_df['total_profit'] / total_perf_df['total_cost_basis']
-
-    # # Blended Holding Period (weighted by cost basis)
-    # total_perf_df['blended_holding_days'] = (
-    #     (total_perf_df['realized_holding_days'] * total_perf_df['realized_cost_basis']) +
-    #     (total_perf_df['unrealized_holding_days'] * total_perf_df['unrealized_cost_basis'])
-    # ) / total_perf_df['total_cost_basis']
-    # total_perf_df['blended_holding_days'] = total_perf_df['blended_holding_days'].replace(0, 1).fillna(1)
-
-    # # Calculate Total Aggregate APR (Realized + Unrealized)
-    # total_perf_df['total_apr'] = total_perf_df['total_return_pct'] * (365 / total_perf_df['blended_holding_days'])
-
-    ########################################################################################
-    # Average purchase price
-    investment_returns_df['avg_purchase_price'] = (
-        investment_returns_df['purchase_amount'] /
-        investment_returns_df['purchase_quantity']
-    )
-
-    # Average sold price
-    investment_returns_df['avg_sold_price'] = (
-        investment_returns_df['sold_amount'] /
-        investment_returns_df['sold_quantity'].replace(0, pd.NA)
-    )
-
-    # Current holdings
-    investment_returns_df['current_holdings'] = (
-        investment_returns_df['purchase_quantity'] -
-        investment_returns_df['sold_quantity']
-    )
-
-    # Attach current price from rankings_df
-    investment_returns_df['current_price'] = (
-        investment_returns_df['cik'].map(
-            ss.rankings_df.set_index('cik')['stock_price']
-        )
-    )
-
-    # Current holdings value
-    investment_returns_df['current_holdings_value'] = (
-        investment_returns_df['current_holdings'] *
-        investment_returns_df['current_price']
-    )
-
-    # Realized gains (simple average-cost method)
-    investment_returns_df['realized_gains'] = investment_returns_df['sold_amount'] - (investment_returns_df['avg_purchase_price'] * investment_returns_df['sold_quantity'])
-
-    # Unrealized gains
-    investment_returns_df['unrealized_gains'] = (
-        investment_returns_df['current_holdings_value'] -
-        (investment_returns_df['avg_purchase_price'] * investment_returns_df['current_holdings'])
-    )
-    
-    investment_returns_df['total_gains']=investment_returns_df['realized_gains']+investment_returns_df['unrealized_gains']
-
-    # --- RETURN CALCULATIONS ---
-
-    today = pd.Timestamp.today()
-
-    # Ensure date is Timestamp
-    investment_returns_df['first_purchase_date'] = pd.to_datetime(investment_returns_df['first_purchase_date'])
-    today = pd.Timestamp.today()
-
-    # Initial Investment Quarter
-    investment_returns_df['first_purchase_quarter'] = investment_returns_df['first_purchase_date'].dt.year.astype(str) + ' Q' + investment_returns_df['first_purchase_date'].dt.quarter.astype(str)
-
-    # Months held
-    investment_returns_df['months_held'] = (
-        (today - investment_returns_df['first_purchase_date']).dt.days // 30
-    )
-
     # Holding period buckets
     bins = [-1, 3, 6, 12, 24, 36, 48, 60, float('inf')]
     labels = [
@@ -2290,31 +2037,51 @@ def show_investment_returns():
         'h) 5+ years'
     ]
 
-    investment_returns_df['holding_period_group'] = pd.cut(
-        investment_returns_df['months_held'],
+    ss.rankings_view_df['holding_period_group'] = pd.cut(
+        ss.rankings_view_df['months_held'],
         bins=bins,
         labels=labels,
         right=True
     )
 
-    investment_returns_df['months_held'] = (
-        round((today - investment_returns_df['first_purchase_date']).dt.days / 30,1)
-    )
+    sector_df = (ss.rankings_view_df
+                .groupby('sector', dropna=False)
+                .agg({'purchased_amount': 'sum'})
+                .reset_index()
+                .sort_values('purchased_amount', ascending=False)
+                )
+    sector_list=sector_df['sector'].tolist()
+
+    industry_df = (ss.rankings_view_df
+                .groupby('industry', dropna=False)
+                .agg({'purchased_amount': 'sum'})
+                .reset_index()
+                .sort_values('purchased_amount', ascending=False)
+                )
+    industry_list=industry_df['industry'].tolist()
+
+    # st.write("ss.rankings_view_df",ss.rankings_view_df) #debug
     
-    # Total return (current value vs cost basis)
-    investment_returns_df['total_return_pct'] = (investment_returns_df['total_gains']/investment_returns_df['purchase_amount']) * 100
-        
+    investment_returns_df = ss.rankings_view_df.copy()
+    
     # Clean up infinite or invalid values
     investment_returns_df = investment_returns_df.replace([np.inf, -np.inf], np.nan)
+
+    investment_returns_df["investment_category"] = (
+        investment_returns_df["investment_category"]
+        .fillna("Uncategorized")
+        .astype("category")
+    )
     
-    investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
-    investment_returns_df['industry'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
-    investment_returns_df['Pct_Chg_from_7_Days_Ago'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'pct_chg_from_1w_ago'].values
+    investment_returns_df['sector'] = ss.rankings_view_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
+    investment_returns_df['industry'] = ss.rankings_view_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
+    investment_returns_df['Pct_Chg_from_7_Days_Ago'] = ss.rankings_view_df.set_index('cik').loc[investment_returns_df['cik'], 'pct_chg_from_1w_ago'].values
 
     col1, col2 = st.columns(2)
     with col1:
         first_purchase_quarter = st.selectbox("Filter by Quarter of First Purchase of the Stock", options=["All"] + investment_returns_df['first_purchase_quarter'].sort_values(ascending=False).unique().tolist(), key='temp_filter_first_purchase_quarter', on_change=update_primary_filter_session_value, args=("filter_first_purchase_quarter",))
         holding_period_group = st.selectbox("Filter by Holding Period", options=["All"] + investment_returns_df['holding_period_group'].cat.categories.tolist(), key='temp_filter_holding_period_group', on_change=update_primary_filter_session_value, args=("filter_holding_period_group",))
+        investment_category = st.selectbox("Filter by Investment Category", options=["All"] + investment_returns_df['investment_category'].cat.categories.tolist(), key='temp_filter_investment_category', on_change=update_primary_filter_session_value, args=("filter_investment_category",))
     with col2:
         sector = st.selectbox("Filter by Sector", options=["All"] + sector_list, key='temp_filter_inv_sector', on_change=update_primary_filter_session_value, args=("filter_inv_sector",))
         industry = st.selectbox("Filter by Industry", options=["All"] + industry_list, key='temp_filter_inv_industry', on_change=update_primary_filter_session_value, args=("filter_inv_industry",))
@@ -2327,6 +2094,8 @@ def show_investment_returns():
         investment_returns_df = investment_returns_df[investment_returns_df['holding_period_group'] == ss.temp_filter_holding_period_group]
     if first_purchase_quarter != "All":
         investment_returns_df = investment_returns_df[investment_returns_df['first_purchase_quarter'] == ss.temp_filter_first_purchase_quarter]
+    if investment_category != "All":
+        investment_returns_df = investment_returns_df[investment_returns_df['investment_category'] == ss.temp_filter_investment_category]
 
     # --- GROUPED TOTALS BY HOLDING PERIOD ---
     def investment_returns_by_slice(investment_returns_df, var_group_by):
@@ -2334,14 +2103,14 @@ def show_investment_returns():
             investment_returns_df
                 .groupby(var_group_by, dropna=False)
                 .agg({
-                    'purchase_amount': 'sum',
+                    'purchased_amount': 'sum',
                     'sold_amount': 'sum',
                     'current_holdings_value': 'sum',
                     'total_gains': 'sum',
                     'realized_gains': 'sum',
                     'unrealized_gains': 'sum',
-                    'purchase_quantity': 'sum',
-                    'current_holdings': 'sum',
+                    'purchased_quantity': 'sum',
+                    'current_holdings_quantity': 'sum',
                     # New: counts
                     'total_return_pct': [
                         ('positive_count', lambda x: (x > 0).sum()),
@@ -2377,9 +2146,9 @@ def show_investment_returns():
     
         # Total return (current value vs cost basis)
         grouped_totals_df['total_return_pct'] = (grouped_totals_df['total_gains'] /
-                grouped_totals_df['purchase_amount']).replace([np.inf, -np.inf], 0).fillna(0) * 100
+                grouped_totals_df['purchased_amount']).replace([np.inf, -np.inf], 0).fillna(0) * 100
         grouped_totals_df.insert(4, 'total_return_pct', grouped_totals_df.pop('total_return_pct'))
-        # holding_period_totals['total_return_pct'] = safe_divide(holding_period_totals['total_gains'],holding_period_totals['purchase_amount']) * 100
+        # holding_period_totals['total_return_pct'] = safe_divide(holding_period_totals['total_gains'],holding_period_totals['purchased_amount']) * 100
         # st.write('holding_period_totals = ',holding_period_totals) # debug
 
         # Preserve your intended order if using categoricals
@@ -2390,13 +2159,16 @@ def show_investment_returns():
                 ordered=True
             )
 
-        grouped_totals_df = grouped_totals_df.sort_values('purchase_amount', ascending=False)
+        grouped_totals_df = grouped_totals_df.sort_values('purchased_amount', ascending=False)
         
         return grouped_totals_df
     
     holding_period_totals = investment_returns_by_slice(investment_returns_df, 'holding_period_group')
     holding_period_totals = holding_period_totals.sort_values('holding_period_group')
-    
+
+    investment_category_totals = investment_returns_by_slice(investment_returns_df, 'investment_category')
+    investment_category_totals = investment_category_totals.sort_values('investment_category')
+
     first_purchase_quarter_investment_totals = investment_returns_by_slice(investment_returns_df, 'first_purchase_quarter')
     first_purchase_quarter_investment_totals = first_purchase_quarter_investment_totals.sort_values('first_purchase_quarter',ascending=False)
     
@@ -2418,13 +2190,12 @@ def show_investment_returns():
     )
 
     # Compute portfolio-level total return
-    total_purchase_amount = investment_returns_df['purchase_amount'].sum()
+    total_purchased_amount = investment_returns_df['purchased_amount'].sum()
     total_sold_amount = investment_returns_df['sold_amount'].sum()
     total_current_value = investment_returns_df['current_holdings_value'].sum()
 
-    portfolio_total_return = ((total_sold_amount + total_current_value) / total_purchase_amount - 1) * 100
+    portfolio_total_return = ((total_sold_amount + total_current_value) / total_purchased_amount - 1) * 100
 
-    # Insert correct total return into totals row
     investment_returns_df.loc[
         investment_returns_df['company_and_ticker'] == "TOTAL",
         'total_return_pct'
@@ -2450,9 +2221,9 @@ def show_investment_returns():
         return ""
 
     # Column groups
-    quantity_cols = ["purchase_quantity", "current_holdings"]
-    price_cols    = ["avg_purchase_price", "current_price"]
-    amount_cols   = ["purchase_amount", "sold_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
+    quantity_cols = ["purchased_quantity", "current_holdings_quantity"]
+    price_cols    = ["avg_purchase_price", "stock_price"]
+    amount_cols   = ["purchased_amount", "sold_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
     percent_cols  = ["total_return_pct","Pct_Chg_from_7_Days_Ago"]
 
     # Format dictionary
@@ -2477,7 +2248,7 @@ def show_investment_returns():
     for col in percent_cols:
         fmt[col] = lambda v: f"{v:.1f}%" if pd.notna(v) and isinstance(v, (int, float)) else v
             
-    fmt["first_purchase_date"] = lambda d: d.strftime("%Y-%m-%d") if pd.notna(d) else ""
+#    fmt["first_purchase_date"] = lambda d: d.strftime("%Y-%m-%d") if pd.notna(d) else ""
     
     # --- SORT TOTALS TO TOP, THEN BY PURCHASE AMOUNT DESC ---
     # Create a sort key: TOTAL row gets 0, others get 1
@@ -2487,26 +2258,26 @@ def show_investment_returns():
 
     total_mask = investment_returns_df["company_and_ticker"] == "TOTAL"
 
-    fields_to_blank_totals = ["ticker","first_purchase_date","months_held","avg_purchase_price","avg_sold_price","current_price","purchase_quantity"
-                            ,"sold_quantity","current_holdings","Pct_Chg_from_7_Days_Ago"]
+    fields_to_blank_totals = ["ticker","first_purchase_date","months_held","avg_purchase_price","avg_sold_price","stock_price","purchased_quantity"
+                            ,"sold_quantity","current_holdings_quantity","Pct_Chg_from_7_Days_Ago"]
 
     for col in fields_to_blank_totals:
         if col in investment_returns_df.columns:
             investment_returns_df.loc[total_mask, col] = ""
 
-    # Sort: TOTAL first, then by purchase_amount descending
+    # Sort: TOTAL first, then by purchased_amount descending
     investment_returns_df = (
         investment_returns_df
-            .sort_values(["sort_key", "purchase_amount"], ascending=[True, False])
+            .sort_values(["sort_key", "purchased_amount"], ascending=[True, False])
             .reset_index(drop=True)
     )
 
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
-    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchase_amount','sold_amount'
-                                                ,'current_holdings','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','total_return_pct'
-                                                ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchase_quantity'
-                                                ,'first_purchase_date','first_purchase_quarter','sector','industry','avg_purchase_price','current_price']]
+    investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchased_amount','sold_amount'
+                                                ,'current_holdings_quantity','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','total_return_pct'
+                                                ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchased_quantity'
+                                                ,'first_purchase_date','first_purchase_quarter','sector','industry','investment_category','avg_purchase_price','stock_price']]
 
     def highlight_total_row(row):
         if row["company_and_ticker"] == "TOTAL":
@@ -2549,6 +2320,16 @@ def show_investment_returns():
     
     st.write("### Totals by Holding Period Group")
     st.dataframe(holding_period_totals_styled, column_config={"holding_period_group": st.column_config.Column("Holding Period Group", width="medium", pinned=True)}, use_container_width=True)
+
+    # Show totals by investment category
+    investment_category_totals_styled = (
+        investment_category_totals.style
+            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .format(fmt)
+    )
+    
+    st.write("### Totals by Investment Category")
+    st.dataframe(investment_category_totals_styled, column_config={"investment_category": st.column_config.Column("Investment Category", width="medium", pinned=True)}, use_container_width=True)
 
     # Show totals by sector
     sector_totals_styled = (
@@ -2706,7 +2487,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         ss.rerun_the_application=False
         st.rerun()
         
-    editable_columns = ['category', 'notes']
+    editable_columns = ['category', 'notes', 'investment_category']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
     columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','buy_amount','sold_amount','curr_value','gain_pct', # 'price_range_52wks',
@@ -2794,9 +2575,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['buy_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
         ss.rankings_df['gain_pct']=((ss.rankings_df['sold_amount']+ss.rankings_df['curr_value'])/ss.rankings_df['buy_amount'])*100-100
 
-        ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(0.01, 5000), 'buy_category'] = 'Speculative'
-        ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(5000.01, 20000), 'buy_category'] = 'Moderate_Investment'
-        ss.rankings_df.loc[ss.rankings_df['buy_amount'] > 20000, 'buy_category'] = 'Large_Investment'
+#        ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(0.01, 5000), 'buy_category'] = 'Speculative'
+#        ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(5000.01, 20000), 'buy_category'] = 'Moderate_Investment'
+#        ss.rankings_df.loc[ss.rankings_df['buy_amount'] > 20000, 'buy_category'] = 'Large_Investment'
 
         # st.write("ss.rankings_df",ss.rankings_df) #debug
         # st.write(f"the len(ss.rankings_df) is {len(ss.rankings_df)}") #debug
@@ -3144,6 +2925,17 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                     st.toast('Change Committed to DB')
                 except Exception as e:
                     st.warning(f'Change failed due to {e}')
+
+            if "investment_category" in changes:
+                update_df = ss.filtered_df.loc[[row_index], ['cik','ticker','company_and_ticker','investment_category','stock_price','trailing_pe','trailing_ps']]
+                new_investment_category = changes.get("investment_category", df.loc[row_index,"investment_category"])
+                update_df['investment_category']=new_investment_category
+
+                try:
+                    postgres_update_bulk(update_df, 'editable_stock_data', ['cik']) 
+                    st.toast('Change Committed to DB')
+                except Exception as e:
+                    st.warning(f'Change failed due to {e}')
      
     st.markdown(
         """
@@ -3168,6 +2960,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'category': st.column_config.SelectboxColumn(label="Category", help="Editable category for this stock", pinned=True, options=ss.categories_list, width=100),
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
+                'investment_category': st.column_config.SelectboxColumn(label="Investment Category", help="Editable investment category for this stock", pinned=True, options=['Small_Speculative','Small_Low_Mult', 'Med_Low_Mult', 'Med_Other','Large_Investment'], width=100),
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.2f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
