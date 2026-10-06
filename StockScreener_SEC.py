@@ -98,6 +98,7 @@ if "quarterly_financials" not in ss:
     ss.columns_include_regression=False
     ss.filters_expanded=False
     ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
+    ss.filter_investment_category = ['Small_Speculative','Small_Low_Mult', 'Med_Low_Mult', 'Med_Other','Large_Investment']
     ss.filter_min_revenue_growth=0
     ss.filter_max_revenue_median=0
     ss.filter_min_revenue_n_count=10
@@ -2960,7 +2961,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'category': st.column_config.SelectboxColumn(label="Category", help="Editable category for this stock", pinned=True, options=ss.categories_list, width=100),
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
-                'investment_category': st.column_config.SelectboxColumn(label="Investment Category", help="Editable investment category for this stock", pinned=True, options=['Small_Speculative','Small_Low_Mult', 'Med_Low_Mult', 'Med_Other','Large_Investment'], width=100),
+                'investment_category': st.column_config.SelectboxColumn(label="Investment Category", help="Editable investment category for this stock", options=ss.filter_investment_category, width=100),
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.2f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
