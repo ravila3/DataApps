@@ -2302,16 +2302,6 @@ def show_investment_returns():
                 )
     st.write("")
 
-    # Show totals by quarter of initial purchase
-    first_purchase_quarter_styled = (
-        first_purchase_quarter_investment_totals.style
-            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
-            .format(fmt)
-    )
-    
-    st.write("### Totals by Quarter of First Purchase of the Stock")
-    st.dataframe(first_purchase_quarter_styled, column_config={"first_purchase_quarter": st.column_config.Column("First Purchase Quarter", width="medium", pinned=True)}, use_container_width=True)
-
     # Show totals by holding period group
     holding_period_totals_styled = (
         holding_period_totals.style
@@ -2331,6 +2321,16 @@ def show_investment_returns():
     
     st.write("### Totals by Investment Category")
     st.dataframe(investment_category_totals_styled, column_config={"investment_category": st.column_config.Column("Investment Category", width="medium", pinned=True)}, use_container_width=True)
+
+    # Show totals by quarter of initial purchase
+    first_purchase_quarter_styled = (
+        first_purchase_quarter_investment_totals.style
+            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .format(fmt)
+    )
+    
+    st.write("### Totals by Quarter of First Purchase of the Stock")
+    st.dataframe(first_purchase_quarter_styled, column_config={"first_purchase_quarter": st.column_config.Column("First Purchase Quarter", width="medium", pinned=True)}, use_container_width=True)
 
     # Show totals by sector
     sector_totals_styled = (
