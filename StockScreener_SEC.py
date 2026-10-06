@@ -2160,7 +2160,13 @@ def show_investment_returns():
                 ordered=True
             )
 
-        grouped_totals_df = grouped_totals_df.sort_values('purchased_amount', ascending=False)
+        grouped_totals_df = (
+            grouped_totals_df[
+                grouped_totals_df['purchased_amount'].notna() &
+                (grouped_totals_df['purchased_amount'] != 0)
+            ]
+            .sort_values('purchased_amount', ascending=False)
+        )
         
         return grouped_totals_df
     
