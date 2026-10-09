@@ -368,7 +368,7 @@ def get_sec_filings(cik_str):
 def sec_edgar_financial_load(cik):
     print('entering into sec_edgar_financial_load function')
     
-    debug_flag=1 #debug
+    debug_flag=0 #debug
     frame_criteria='2026Q2' #debug '2024Q4' is an example
     metric_criteria='NetIncomeLoss' # 'RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractsWithCustomers','Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
     metrics_df=pd.DataFrame()
