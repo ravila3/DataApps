@@ -2978,8 +2978,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 # ,height=450
                 ,column_config= {
                 'company_and_ticker': st.column_config.TextColumn(label='Company and Ticker',pinned=True),
-                'chart':st.column_config.CheckboxColumn(label='Charts', help="Show charts for this stock", width="small", pinned=True),
-                'action':st.column_config.CheckboxColumn(label='Buy/Sell', help="Enter buy or sell action for this stock", width="small", pinned=True),
+                'chart':st.column_config.CheckboxColumn(label='Charts', help="Show charts for this stock", width=50, pinned=True),
+                'action':st.column_config.CheckboxColumn(label='Buy/Sell', help="Enter buy or sell action for this stock", width=50, pinned=True),
                 # "Yahoo_Link": st.column_config.LinkColumn(label="Links",display_text="https://finance.yahoo.com",display_text="Open Chart ↗"),
                 'category': st.column_config.SelectboxColumn(label="Category", help="Editable category for this stock", pinned=True, options=ss.categories_list, width=100),
                 'industry': st.column_config.TextColumn(label="industry", width=100),
