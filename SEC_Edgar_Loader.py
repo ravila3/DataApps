@@ -369,7 +369,7 @@ def sec_edgar_financial_load(cik):
     print('entering into sec_edgar_financial_load function')
     
     debug_flag=0 #debug
-    frame_criteria='2025Q3' #debug '2024Q4' is an example
+    frame_criteria='2026Q2' #debug '2024Q4' is an example
     metric_criteria='NetIncomeLoss' # 'RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractsWithCustomers','Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
     metrics_df=pd.DataFrame()
 
@@ -400,10 +400,10 @@ def sec_edgar_financial_load(cik):
         ('ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost', 'Income Statement', 'USD','R&D Exp','I'),
         ('OperatingIncomeLoss', 'Income Statement', 'USD','Operating Income','I'),
         ('IncomeLossFromContinuingOperations', 'Income Statement', 'USD','Operating Income','I'),
-        ('ProfitLoss', 'Income Statement', 'USD','Operating Income','I'),
         ('IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments', 'Income Statement', 'USD','Operating Income','I'),
         ('IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest', 'Income Statement', 'USD','Pretax Income','I'),
         ('NetIncomeLoss', 'Income Statement', 'USD','Net Income','I'),
+        ('ProfitLoss', 'Income Statement', 'USD','Net Income','I'), # Changed from 'Operating Income' to fix THRM on 10/9/26
         ('NetIncomeLossAvailableToCommonStockholdersBasic', 'Income Statement', 'USD','Net Income','I'),
         ('IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest', 'Income Statement', 'USD','Net Income','I'),
         ('InterestExpense', 'Income Statement', 'USD','Interest Expense','E'),
@@ -519,7 +519,7 @@ def sec_edgar_financial_load(cik):
             if debug_flag==1:
                 st.json(truncate_dict(companyfacts_data, metric_criteria=metric_criteria)) #debug
                 # show_all_metrics_debug(companyfacts_data) #debug
-                # show_all_metrics_single_qtr(companyfacts_data,frame_criteria) #debug
+                show_all_metrics_single_qtr(companyfacts_data,frame_criteria) #debug
                 # st.write("CompanyFacts Response:", companyfacts_data['facts']['us-gaap']['EarningsPerShareDiluted']) #debug ['units']['USD']
             # st.write("CompanyFacts Response:", companyfacts_data['facts']['us-gaap'])  #debug
             
