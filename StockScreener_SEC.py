@@ -98,7 +98,7 @@ if "quarterly_financials" not in ss:
     ss.columns_include_regression=False
     ss.filters_expanded=False
     ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
-    ss.filter_investment_category = ['Small_Speculative','Small_Momentum','Small_Grwth_NegRev','Small_Low_Mult', 'Med_Low_Mult', 'Med_Grwth_NegRev','Med_High_Mult', 'Med_Other','Large_Investment']
+    ss.filter_investment_category = ['Small_Momentum','Small_Grwth_NegInc','Small_Low_Mult', 'Med_Low_Mult', 'Med_Grwth_NegInc','Med_High_Mult', 'Med_Other','Large_Investment']
     ss.filter_min_revenue_growth=0
     ss.filter_max_revenue_median=0
     ss.filter_min_revenue_n_count=10
@@ -151,6 +151,7 @@ def reset_forms_ss_vars():
     ss.load_sec_incremental_filings=ss.load_sec_full_filings=False
     ss.selected_company=None
     ss.filter_category = ['Buy Now','Owned','Strong Rev & Income Growth', 'Strong Rev, Neg Income']
+    ss.filter_investment_category = ['Small_Momentum','Small_Grwth_NegInc','Small_Low_Mult', 'Med_Low_Mult', 'Med_Grwth_NegInc','Med_High_Mult', 'Med_Other','Large_Investment']
     ss.filter_min_revenue_growth=0
     ss.filter_max_revenue_median=0
     ss.filter_min_revenue_n_count=10
