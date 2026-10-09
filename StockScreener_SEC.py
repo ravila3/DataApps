@@ -2022,9 +2022,10 @@ def show_investment_returns():
         st.warning(":red[No transactions found. Please add transactions to see investment returns analysis.]")
         return
     
-    ss.rankings_df = load_stock_growth_analysis_data_from_db()
+#    ss.rankings_df = load_stock_growth_analysis_data_from_db()
     ss.rankings_view_df = load_stock_growth_analysis_merged_view_from_db()
-    
+    ss.rankings_view_df = ss.rankings_view_df[ss.rankings_view_df['purchased_amount'].notnull()]
+        
     # Holding period buckets
     bins = [-1, 3, 6, 12, 24, 36, 48, 60, float('inf')]
     labels = [
@@ -2179,10 +2180,10 @@ def show_investment_returns():
     first_purchase_quarter_investment_totals = investment_returns_by_slice(investment_returns_df, 'first_purchase_quarter')
     first_purchase_quarter_investment_totals = first_purchase_quarter_investment_totals.sort_values('first_purchase_quarter',ascending=False)
     
-    investment_returns_df['sector'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
+    investment_returns_df['sector'] = ss.rankings_view_df.set_index('cik').loc[investment_returns_df['cik'], 'sector'].values
     sector_totals = investment_returns_by_slice(investment_returns_df, 'sector')
 
-    investment_returns_df['industry'] = ss.rankings_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
+    investment_returns_df['industry'] = ss.rankings_view_df.set_index('cik').loc[investment_returns_df['cik'], 'industry'].values
     industry_totals = investment_returns_by_slice(investment_returns_df, 'industry')
 
     # --- ADD TOTALS ROW ---
