@@ -368,7 +368,7 @@ def get_sec_filings(cik_str):
 def sec_edgar_financial_load(cik):
     print('entering into sec_edgar_financial_load function')
     
-    debug_flag=0 #debug
+    debug_flag=1 #debug
     frame_criteria='2026Q2' #debug '2024Q4' is an example
     metric_criteria='NetIncomeLoss' # 'RevenueFromContractWithCustomerExcludingAssessedTax','RevenueFromContractsWithCustomers','Revenues' 'LongTermDebt' #'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment' #debug
     metrics_df=pd.DataFrame()
@@ -402,8 +402,8 @@ def sec_edgar_financial_load(cik):
         ('IncomeLossFromContinuingOperations', 'Income Statement', 'USD','Operating Income','I'),
         ('IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments', 'Income Statement', 'USD','Operating Income','I'),
         ('IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest', 'Income Statement', 'USD','Pretax Income','I'),
-        ('NetIncomeLoss', 'Income Statement', 'USD','Net Income','I'),
         ('ProfitLoss', 'Income Statement', 'USD','Net Income','I'), # Changed from 'Operating Income' to fix THRM on 10/9/26
+        ('NetIncomeLoss', 'Income Statement', 'USD','Net Income','I'),
         ('NetIncomeLossAvailableToCommonStockholdersBasic', 'Income Statement', 'USD','Net Income','I'),
         ('IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest', 'Income Statement', 'USD','Net Income','I'),
         ('InterestExpense', 'Income Statement', 'USD','Interest Expense','E'),
