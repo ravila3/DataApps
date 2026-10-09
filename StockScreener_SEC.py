@@ -2617,7 +2617,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         }
     
     def build_styler(df, max_col_width: str = "140px"):
-        
         styled = df.style
 
         cols_for_color_inc=[
@@ -2672,7 +2671,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
             def red_func(s, q40=q40):
                 return ['background-color: red' if v <= q40 else '' for v in s]
             styled = styled.apply(red_func, subset=[col])
-                
+
         return styled
 
     disabled_cols = list(set(columns) - set(editable_columns) )
@@ -2847,8 +2846,19 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         ss.view_stock_analysis_form=True
         st.rerun()
 
-    # ss.df=filtered_df.copy()        
+    # ss.df=filtered_df.copy()
     styled = build_styler(ss.filtered_df)
+                    
+    def yellow_penny_stock(row):
+        styles = [''] * len(row)
+
+        if row['stock_price'] < 3.00:
+            vp_idx = row.index.get_loc('Value_Pressure')
+            styles[vp_idx] = 'background-color: yellow'
+
+        return styles
+
+    styled = styled.apply(yellow_penny_stock, axis=1)
     
     def on_change_handle():
         
