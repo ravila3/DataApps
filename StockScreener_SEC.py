@@ -2852,9 +2852,14 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     def yellow_penny_stock_or_low_volume(row):
         styles = [''] * len(row)
 
-        if row['stock_price'] < 2.00 or row['volume'] < 10000:
+        if row['volume'] < 10000:
             vp_idx = row.index.get_loc('Value_Pressure')
-            styles[vp_idx] = 'background-color: yellow'
+            styles[vp_idx] = 'background-color: #D4C000; color: black' # slightly darker yellow for low volume
+
+        if row['stock_price'] < 2.00:
+            vp_idx = row.index.get_loc('Value_Pressure')
+            styles[vp_idx] = 'background-color: yellow; color: black'
+
 
         return styles
 
