@@ -2849,16 +2849,16 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     # ss.df=filtered_df.copy()
     styled = build_styler(ss.filtered_df)
                     
-    def yellow_penny_stock(row):
+    def yellow_penny_stock_or_low_volume(row):
         styles = [''] * len(row)
 
-        if row['stock_price'] < 2.00:
+        if row['stock_price'] < 2.00 or row['volume'] < 10000:
             vp_idx = row.index.get_loc('Value_Pressure')
             styles[vp_idx] = 'background-color: yellow'
 
         return styles
 
-    styled = styled.apply(yellow_penny_stock, axis=1)
+    styled = styled.apply(yellow_penny_stock_or_low_volume, axis=1)
     
     def on_change_handle():
         
