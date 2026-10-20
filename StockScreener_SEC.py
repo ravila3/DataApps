@@ -3000,7 +3000,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'trailing_pe':st.column_config.NumberColumn(label="P/E Trailing", help="Trailing Price to Earnings Ratio", format='%.1f', width=50),
                 'forward_pe':st.column_config.NumberColumn(label="P/E Fwd", help="Forward Price to Earnings Ratio based on analyst estimated earnings", format='%.1f', width=50),
                 'trailing_ps':st.column_config.NumberColumn(label="P/S Trailing", help="Trailing Price-to-Sales Ratio", format='%.1f', width=50),
-                'div_yield':st.column_config.NumberColumn(label="Div Yield", help="Dividend Yield", format='%.1f', width=60),
+                'div_yield':st.column_config.NumberColumn(label="Div Yield", help="Dividend Yield", format='%.1f', width=50),
                 "Consolidated_Score": st.column_config.NumberColumn(label="Consol Value Score", help="Consolidated Value Score", format='%.1f', width="small"),
                 'Growth_Quality': st.column_config.NumberColumn(label="Growth_Quality", help="Growth Quality Score", format='%.1f', width="small"),
                 'Recent_Momentum': st.column_config.NumberColumn(label="Recent_Momentum", help="Recent Momentum Score", format='%.1f', width="small"),
