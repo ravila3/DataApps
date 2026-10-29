@@ -2985,7 +2985,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'industry': st.column_config.TextColumn(label="industry", width=100),
                 'sector': st.column_config.TextColumn(label="sector"),
                 'investment_category': st.column_config.SelectboxColumn(label="Investment Category", help="Editable investment category for this stock", options=ss.filter_investment_category, width=100),
-                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.2f', width="small"),
+                'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.3f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
                 'buy_amount':st.column_config.NumberColumn(label="Buy Amount", help="Total Amount Bought", format='dollar', step='int', width="small"),
