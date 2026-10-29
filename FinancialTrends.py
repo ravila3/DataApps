@@ -33,6 +33,7 @@ if 'cik' not in ss:
     ss.filings_df=pd.DataFrame()
     ss.quarterly_financials=pd.DataFrame()
     ss.annual_financials=pd.DataFrame()
+    ss.balance_sheet_columns=pd.DataFrame()
     # ss.sp=pd.DataFrame(columns=['Column1'])
     ss.analysis_result=''
     ss.messages=[]
@@ -364,6 +365,7 @@ def main():
             ss.sp = pd.DataFrame()
             ss.companyfacts_metrics_yahoo_dict = {}
             ss.analysis_result=''
+            ss.balance_sheet_columns=[]
             ss.messages=[] # Clear out messages
             ss.counter=0 # Reset counter
             ss.llm_analysis_requested=False
