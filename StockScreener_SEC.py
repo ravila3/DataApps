@@ -2620,7 +2620,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         styled = df.style
 
         cols_for_color_inc=[
-                'div_yield','gain_pct', 'volume','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
+                'div_yield', 'gain_pct', 'volume','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
@@ -2628,10 +2628,12 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 ,'Consolidated_Score','Growth_Quality','Stability_Trend','Recent_Momentum'
             ]
         cols_red_bottom_quintile = ['Revenue_Growth_N','Income_Growth_N','Margin_Growth_N']
-        cols_for_color_desc = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
+        cols_for_color_desc = ['Value_Pressure','trailing_pe','trailing_ps','forward_pe','Revenue_Growth_Outlier_PCT','Income_Growth_Outlier_PCT']
+        col_for_color_price_desc = ['Pct_Chg_from_52_Wk_High','Pct_Chg_from_7_Days_Ago']
 
         q_inc = compute_quantiles(df, cols_for_color_inc)
         q_dec = compute_quantiles(df, cols_for_color_desc)
+        q_price_desc = compute_quantiles(df, col_for_color_price_desc)
         q_bottom = compute_low_quantiles(df, cols_red_bottom_quintile)
         
         for col, (q20, q40, q60, q80) in q_inc.items():
@@ -2653,13 +2655,34 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                         out.append('')
                         continue
 
-                    # apply original rules
                     if v >= q80:
                         out.append('background-color: darkred')
                     elif v <= q40:
                         out.append('background-color: green')
                     elif v <= q60:
                         out.append('background-color: mediumseagreen')
+                    else:
+                        out.append('')
+                return out
+
+            styled = styled.apply(color_func, subset=[col])
+
+        for col, (q20, q40, q60, q80) in q_price_desc.items():
+            def color_func(s, q20=q20, q40=q40, q60=q60, q80=q80):
+                out = []
+                for v in s:
+                    # skip NaN and near-zero values
+                    if pd.isna(v) or (isinstance(v, (int, float)) and abs(v) < 0.01):
+                        out.append('')
+                        continue
+
+                    # apply original rules
+                    if v >= q80:
+                        out.append('background-color: darkred')
+                    elif v <= q40:
+                        out.append('background-color: #174A7E')
+                    elif v <= q60:
+                        out.append('background-color: #2166AC')
                     else:
                         out.append('')
                 return out
@@ -2859,7 +2882,6 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         if row['stock_price'] < 2.00:
             vp_idx = row.index.get_loc('Value_Pressure')
             styles[vp_idx] = 'background-color: yellow; color: black'
-
 
         return styles
 
