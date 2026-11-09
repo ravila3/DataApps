@@ -2117,7 +2117,7 @@ def show_investment_returns():
         return xirr(cash_flows)
 
     xirr_portfolio = portfolio_return(tx)
-    st.write(f"Portfolio XIRR: {xirr_portfolio:.1%}" if pd.notna(xirr_portfolio) else "Portfolio XIRR: N/A")
+#    st.write(f"Portfolio XIRR: {xirr_portfolio:.1%}" if pd.notna(xirr_portfolio) else "Portfolio XIRR: N/A")
 
     # Holding period buckets
     bins = [-1, 3, 6, 12, 24, 36, 48, 60, float('inf')]
