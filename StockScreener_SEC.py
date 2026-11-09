@@ -16,6 +16,8 @@ import uuid
 import math
 import logging
 from datetime import datetime,timedelta
+from scipy.optimize import brentq
+
 
 logging.basicConfig(
     filename="sec_loader_errors.log",
@@ -2022,11 +2024,101 @@ def show_investment_returns():
     if ss.transaction_df.empty:
         st.warning(":red[No transactions found. Please add transactions to see investment returns analysis.]")
         return
-    
+
+    tx = ss.transaction_df.copy().sort_values(by='date', ascending=True)
+    tx['cash_flow'] = np.where(tx['action'] == 'Buy', -tx['total'], tx['total'])
+
 #    ss.rankings_df = load_stock_growth_analysis_data_from_db()
     ss.rankings_view_df = load_stock_growth_analysis_merged_view_from_db()
     ss.rankings_view_df = ss.rankings_view_df[ss.rankings_view_df['purchased_amount'].notnull()]
+
+    from scipy.optimize import newton
+
+    def xirr(cash_flows, debug_flag=False):
+        """Calculates XIRR for a DataFrame with 'date' and 'cash_flow' columns."""
+        try:
+            # Standardize types and drop missing/inf values
+            cf = cash_flows[["date", "cash_flow"]].copy()
+            cf["date"] = pd.to_datetime(cf["date"], errors="coerce")
+            cf["cash_flow"] = pd.to_numeric(cf["cash_flow"], errors="coerce")
+            cf = cf.replace([np.inf, -np.inf], np.nan).dropna()
+
+            # Combine same-day dates and sort sequentially
+            cf = cf.groupby("date")["cash_flow"].sum().reset_index()
+            cf = cf[cf["cash_flow"] != 0].sort_values("date")
+
+            # Validation: Must have at least two entries, plus both positive and negative cash flows
+            vals = cf["cash_flow"].values
+            if len(vals) < 2 or not (any(vals < 0) and any(vals > 0)):
+                return np.nan
+
+            # Calculate time fraction in years from the first cash flow
+            years = (cf["date"] - cf["date"].min()).dt.days.values / 365.25
+
+            # Define the NPV equation to find the root for
+            # NPV = Sum( Cash_Flow / (1 + r)^years )
+            npv_func = lambda r: np.sum(vals / ((1 + r) ** years))
+
+            # Solve for rate 'r' starting with a reasonable 10% guess
+            
+            if debug_flag:
+                st.write("cash_flows:", cash_flows)
+                st.write(f"Cash Flows:\n{cf}")
+                st.write(f"Years: {years}")
+                st.write(f"NPV Function: {npv_func}")
+                st.write(f"Newton: {newton(npv_func, x0=0.1)*100:.2f}")
+                
+            newton_result = newton(npv_func, x0=0.1)*100
+            
+            # apply min/max to ensure the result is within a reasonable range
+            if newton_result < -100 or newton_result > 10000:
+                return np.nan
+            
+            return newton_result
+
+        except (ValueError, RuntimeError):
+            # Returns NaN if the solver fails to converge
+            return np.nan
+    
+#    st.write('tx:',tx) #debug
+    
+    for cik in ss.rankings_view_df['cik'].unique():
+        cash_flows=tx[tx['cik']==cik][['date','cash_flow']].copy()
+        if cash_flows.empty:
+            continue
+        current_value = float(ss.rankings_view_df.loc[ss.rankings_view_df['cik']==cik,'current_holdings_value'])
+        if current_value != 0:
+            final_row = pd.DataFrame({
+                "date": [pd.Timestamp.today().normalize()],
+                "cash_flow": [current_value]
+            })
+            cash_flows = pd.concat([cash_flows, final_row], ignore_index=True)   
         
+        ss.rankings_view_df.loc[ss.rankings_view_df['cik']==cik,'xirr'] = xirr(cash_flows)
+#        st.write('df:',df) #debug
+#        st.write(r) #debug
+
+    # Move xirr column to the right of total_return_pct
+    xirr_col = ss.rankings_view_df.pop('xirr')
+    ss.rankings_view_df.insert(ss.rankings_view_df.columns.get_loc('total_return_pct'), 'xirr', xirr_col)
+#    st.write('ss.rankings_view_df:', ss.rankings_view_df) #debug
+    
+    def portfolio_return(df):
+        tx=df.copy()
+        tx['date'] = pd.to_datetime(tx['date'])
+        tx['cash_flow'] = np.where(tx['action'] == 'Buy', -tx['total'], tx['total'])
+        current_portfolio_value=sum(ss.rankings_view_df['current_holdings_value'])
+        final_row = pd.DataFrame({
+            'date': [pd.Timestamp.today().normalize()],
+            'cash_flow': [current_portfolio_value]
+        })
+        cash_flows = pd.concat([tx[['date','cash_flow']], final_row], ignore_index=True)
+        # st.write('portfolio cash flows:', cash_flows) #debug
+        return xirr(cash_flows)
+
+    xirr_portfolio = portfolio_return(tx)
+    st.write(f"Portfolio XIRR: {xirr_portfolio:.1%}" if pd.notna(xirr_portfolio) else "Portfolio XIRR: N/A")
+
     # Holding period buckets
     bins = [-1, 3, 6, 12, 24, 36, 48, 60, float('inf')]
     labels = [
@@ -2112,8 +2204,8 @@ def show_investment_returns():
                     'total_gains': 'sum',
                     'realized_gains': 'sum',
                     'unrealized_gains': 'sum',
-                    'purchased_quantity': 'sum',
-                    'current_holdings_quantity': 'sum',
+#                    'purchased_quantity': 'sum',
+#                    'current_holdings_quantity': 'sum',
                     # New: counts
                     'total_return_pct': [
                         ('positive_count', lambda x: (x > 0).sum()),
@@ -2124,6 +2216,30 @@ def show_investment_returns():
                 .reset_index()
         )
         
+        tx = ss.transaction_df.copy().sort_values('date')
+        tx['cash_flow'] = np.where(tx['action'] == 'Buy', -tx['total'], tx['total'])
+        tx['var_group_by'] = ss.rankings_view_df.set_index('cik').loc[tx['cik'], var_group_by].values
+#        st.write('tx:',tx) #debug)
+        
+        for var_group_by_value in grouped_totals_df[var_group_by]:
+            if pd.isna(var_group_by_value):
+                continue
+            cash_flows = tx[tx['var_group_by'] == var_group_by_value][['date', 'cash_flow']]
+            current_value = float(grouped_totals_df.loc[grouped_totals_df[var_group_by] == var_group_by_value, 'current_holdings_value'].values[0])
+            if current_value != 0:
+                final_row = pd.DataFrame({
+                    "date": [pd.Timestamp.today().normalize()],
+                    "cash_flow": [current_value]
+                })
+                cash_flows = pd.concat([cash_flows, final_row], ignore_index=True)
+
+#            if var_group_by_value=='c) 7–12 months': #debug
+#                xirr(cash_flows, debug_flag=True) #debug
+
+            xirr_value = xirr(cash_flows)
+#            st.write(f'cash_flows for {var_group_by_value}',cash_flows, f'XIRR is {xirr_value}') #debug)
+            grouped_totals_df.loc[grouped_totals_df[var_group_by] == var_group_by_value, 'xirr'] = xirr_value if pd.notna(xirr_value) else np.nan
+                        
         def flatten(col):
             # If it's not a tuple, return as-is
             if not isinstance(col, tuple):
@@ -2170,8 +2286,14 @@ def show_investment_returns():
             .sort_values('purchased_amount', ascending=False)
         )
         
+        # Move xirr column to the right of total_return_pct
+        xirr_col = grouped_totals_df.pop('xirr')
+        grouped_totals_df.insert(grouped_totals_df.columns.get_loc('total_return_pct'), 'xirr', xirr_col)
+
+#        st.write(f"Grouped totals by {var_group_by}:", grouped_totals_df)  # debug        
+        
         return grouped_totals_df
-    
+        
     holding_period_totals = investment_returns_by_slice(investment_returns_df, 'holding_period_group')
     holding_period_totals = holding_period_totals.sort_values('holding_period_group')
 
@@ -2203,12 +2325,18 @@ def show_investment_returns():
     total_sold_amount = investment_returns_df['sold_amount'].sum()
     total_current_value = investment_returns_df['current_holdings_value'].sum()
 
-    portfolio_total_return = ((total_sold_amount + total_current_value) / total_purchased_amount - 1) * 100
+    portfolio_total_return = xirr_portfolio #((total_sold_amount + total_current_value) / total_purchased_amount - 1) * 100
 
     investment_returns_df.loc[
         investment_returns_df['company_and_ticker'] == "TOTAL",
         'total_return_pct'
     ] = portfolio_total_return
+
+    investment_returns_df.loc[
+        investment_returns_df['company_and_ticker'] == "TOTAL",
+        'xirr'
+    ] = portfolio_total_return
+
     
     # Columns to remove
     cols_to_remove = ["cik", "sold_quantity", "avg_sold_price"]
@@ -2233,7 +2361,7 @@ def show_investment_returns():
     quantity_cols = ["purchased_quantity", "current_holdings_quantity"]
     price_cols    = ["avg_purchase_price", "stock_price"]
     amount_cols   = ["purchased_amount", "sold_amount", "current_holdings_value","total_gains","realized_gains", "unrealized_gains"]
-    percent_cols  = ["total_return_pct","Pct_Chg_from_7_Days_Ago"]
+    percent_cols  = ["total_return_pct","Pct_Chg_from_7_Days_Ago","xirr"]
 
     # Format dictionary
     fmt = {}
@@ -2284,7 +2412,7 @@ def show_investment_returns():
     # Drop helper column
     investment_returns_df = investment_returns_df.drop(columns=["sort_key"])
     investment_returns_df = investment_returns_df[['ticker','company_and_ticker','purchased_amount','sold_amount'
-                                                ,'current_holdings_quantity','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','total_return_pct'
+                                                ,'current_holdings_quantity','current_holdings_value','Pct_Chg_from_7_Days_Ago','total_gains','xirr','total_return_pct'
                                                 ,'realized_gains','unrealized_gains','months_held','holding_period_group','purchased_quantity'
                                                 ,'first_purchase_date','first_purchase_quarter','sector','industry','investment_category','avg_purchase_price','stock_price']]
 
@@ -2293,9 +2421,11 @@ def show_investment_returns():
             return ["background-color: #002147"] * len(row)
         return [""] * len(row)
 
+    subset_cols = ['total_gains',"realized_gains","unrealized_gains","total_return_pct","xirr","Pct_Chg_from_7_Days_Ago"]
+
     styled_df = (
         investment_returns_df.style
-            .map(color_gains, subset=['total_gains',"realized_gains","unrealized_gains","total_return_pct","Pct_Chg_from_7_Days_Ago"])
+            .map(color_gains, subset=subset_cols)
             .apply(highlight_total_row, axis=1)
             .format(fmt)
     )
@@ -2310,20 +2440,22 @@ def show_investment_returns():
                 )
     st.write("")
 
+    subset_cols = ['total_gains',"realized_gains","unrealized_gains","total_return_pct","xirr"]
+
     # Show totals by holding period group
     holding_period_totals_styled = (
         holding_period_totals.style
-            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .map(color_gains, subset=subset_cols)
             .format(fmt)
     )
-    
+        
     st.write("### Totals by Holding Period Group")
     st.dataframe(holding_period_totals_styled, column_config={"holding_period_group": st.column_config.Column("Holding Period Group", width="medium", pinned=True)}, use_container_width=True)
 
     # Show totals by investment category
     investment_category_totals_styled = (
         investment_category_totals.style
-            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .map(color_gains, subset=subset_cols)
             .format(fmt)
     )
     
@@ -2333,7 +2465,7 @@ def show_investment_returns():
     # Show totals by quarter of initial purchase
     first_purchase_quarter_styled = (
         first_purchase_quarter_investment_totals.style
-            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .map(color_gains, subset=subset_cols)
             .format(fmt)
     )
     
@@ -2343,7 +2475,7 @@ def show_investment_returns():
     # Show totals by sector
     sector_totals_styled = (
         sector_totals.style
-            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .map(color_gains, subset=subset_cols)
             .format(fmt)
     )
     st.write("### Totals by Sector")
@@ -2352,7 +2484,7 @@ def show_investment_returns():
     # Show totals by industry
     industry_totals_styled = (
         industry_totals.style
-            .map(color_gains, subset=['total_gains','realized_gains','unrealized_gains',"total_return_pct"])
+            .map(color_gains, subset=subset_cols)
             .format(fmt)
     )
     st.write("### Totals by Industry")
