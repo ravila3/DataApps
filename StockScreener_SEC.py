@@ -1353,9 +1353,13 @@ def get_column_specs_results_df():
         "cik": {"pg_name": "cik", "fmt": "{}"},
         "ticker": {"pg_name": "ticker", "fmt": "{}"},
         "company_and_ticker": {"pg_name": "company_and_ticker", "fmt": "{}"},
+        "purchased_amount": {"pg_name": "purchased_amount", "fmt": "${:,.0f}"},
+        "sold_amount": {"pg_name": "sold_amount", "fmt": "${:,.0f}"},
+        "current_holdings_value": {"pg_name": "current_holdings_value", "fmt": "${:,.0f}"},
         "Pct_Chg_from_52_Wk_High": {"pg_name": "pct_chg_from_52wk_high", "fmt": "{:.1f}"},
         "Pct_Chg_from_52_Wk_Low": {"pg_name": "pct_chg_from_52wk_low", "fmt": "{:.1f}"},
         "Pct_Chg_from_7_Days_Ago": {"pg_name": "pct_chg_from_1w_ago", "fmt": "{:.1f}"},
+        "Pct_Chg_from_Last_Sold_Price": {"pg_name": "pct_chg_from_last_sold_price", "fmt": "{:.1f}"},
         "Consolidated_Score": {"pg_name": "consolidated_score", "fmt": "{:.1f}"},
         "Growth_Quality": {"pg_name": "growth_quality", "fmt": "{:.1f}"},
         "Recent_Momentum": {"pg_name": "recent_momentum", "fmt": "{:.1f}"},
@@ -2561,12 +2565,15 @@ def show_investment_returns():
     )
 
 def update_primary_filter_session_value(key):
+    print(f"Entering update_primary_filter_session_value with key={key}, ss.sort_column={ss.temp_sort_column}, ss.sort_direction={ss.temp_sort_direction}")
     temp_key = 'temp_'+key
     ss[key] = ss[temp_key]
     if key != 'filter_company_and_ticker':
         ss.filter_company_and_ticker=ss.temp_filter_company_and_ticker=None
     if 'sort' in key.lower():
-        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
+        # ss.editable_stock_growth_analysis_df['purchased_amount'] = pd.to_numeric(ss.editable_stock_growth_analysis_df['purchased_amount'], errors='coerce')
+        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.temp_sort_column,ascending=(ss.temp_sort_direction=="Asc"),na_position='last')
+    ss.rerun_app=True
 
 def reset_show_modal():
     ss.transaction_show_modal = False
@@ -2631,8 +2638,8 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     editable_columns = ['category', 'notes', 'investment_category']
     # stock_growth_analysis_df=stock_growth_analysis_df[stock_growth_analysis_df['revenue_growth_slope'] > 0] # Filter to only show companies with positive revenue growth slope
 
-    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','buy_amount','sold_amount','curr_value','gain_pct', # 'price_range_52wks',
-        'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago', 
+    columns = [ 'cik', 'ticker', 'company_and_ticker','industry','sector'] + editable_columns + ['curr_quantity','stock_price','volume','purchased_amount','sold_amount','Pct_Chg_from_Last_Sold_Price','current_holdings_value','total_return_pct', # 'price_range_52wks',
+        'Pct_Chg_from_52_Wk_High', 'Pct_Chg_from_52_Wk_Low','Pct_Chg_from_7_Days_Ago',
         'Consolidated_Score','Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure',
         'trailing_pe', 'forward_pe', 'trailing_ps', 'div_yield',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Income_Positive',
@@ -2644,81 +2651,91 @@ def display_stock_analysis_form(stock_growth_analysis_df):
     # st.write("**Stock Growth Analysis Data:**")
     if len(ss.editable_stock_growth_analysis_df) == 0 or len(ss.rankings_df)==0: #or ss.editable_stock_growth_analysis_df.empty or ss.rankings_df.empty
         print("display_stock_analysis_form: 1+ dataframes empty, reloading")
-        ss.rankings_df = load_stock_growth_analysis_data_from_db()
+        ss.rankings_df = load_stock_growth_analysis_merged_view_from_db()
+        ss.rankings_df.drop(columns=editable_columns, inplace=True)
         column_specs = get_column_specs_results_df()
         rename_map = {
             spec["pg_name"]: pretty
             for pretty, spec in column_specs.items()
         }
         ss.rankings_df = ss.rankings_df.rename(columns=rename_map)
+        #st.write("ss.rankings_view_df",ss.rankings_view_df) #debug
+        
+#        ss.rankings_df = load_stock_growth_analysis_data_from_db()
+#        column_specs = get_column_specs_results_df()
+#        rename_map = {
+#            spec["pg_name"]: pretty
+#            for pretty, spec in column_specs.items()
+#        }
+#        ss.rankings_df = ss.rankings_df.rename(columns=rename_map)
         
         # integrate transaction quantities
-        tx=load_stock_transactions_from_db(ss.user_id)
+#        tx=load_stock_transactions_from_db(ss.user_id)
         
         # 1) Defensive copy and normalization
-        tx['action'] = tx['action'].astype(str).str.strip().str.lower()   # normalize action values
-        tx['quantity'] = pd.to_numeric(tx['quantity'], errors='coerce') #.fillna(0)  # numeric quantities
+#       tx['action'] = tx['action'].astype(str).str.strip().str.lower()   # normalize action values
+#        tx['quantity'] = pd.to_numeric(tx['quantity'], errors='coerce') #.fillna(0)  # numeric quantities
 
         # 2) Pivot/aggregate: sum quantity by cik x action
-        agg = (
-            tx.pivot_table(
-                index='cik',
-                columns='action',
-                values='quantity',
-                aggfunc='sum',
-                fill_value=0
-            )
-            .rename(columns={'buy': 'buy_quantity', 'sell': 'sell_quantity'})
-            .reset_index()
-        )
+#        agg = (
+#            tx.pivot_table(
+#                index='cik',
+#                columns='action',
+#                values='quantity',
+#                aggfunc='sum',
+#                fill_value=0
+#            )
+#            .rename(columns={'buy': 'buy_quantity', 'sell': 'sell_quantity'})
+#            .reset_index()
+#        )
         
-        # Add buy_amount (sum of total for buy actions)
-        buy_amounts = (
-            tx[tx['action'] == 'buy']
-            .groupby('cik', as_index=False)['total']
-            .sum()
-            .rename(columns={'total': 'buy_amount'})
-        )
+        # Add purchased_amount (sum of total for buy actions)
+#        purchased_amounts = (
+#            tx[tx['action'] == 'buy']
+#            .groupby('cik', as_index=False)['total']
+#            .sum()
+#            .rename(columns={'total': 'purchased_amount'})
+#        )
 
-        sold_amounts = (
-            tx[tx['action'] == 'sell']
-            .groupby('cik', as_index=False)['total']
-            .sum()
-            .rename(columns={'total': 'sold_amount'})
-        )
+#        sold_amounts = (
+#            tx[tx['action'] == 'sell']
+#            .groupby('cik', as_index=False)['total']
+#            .sum()
+#            .rename(columns={'total': 'sold_amount'})
+#        )
 
-        agg = agg.merge(buy_amounts, on='cik', how='left')
-        agg['buy_amount'] = agg['buy_amount'] #.fillna(0)
-        agg = agg.merge(sold_amounts, on='cik', how='left')
-        agg['sold_amount'] = agg['sold_amount'] #.fillna(0)
+#        agg = agg.merge(purchased_amounts, on='cik', how='left')
+#        agg['purchased_amount'] = agg['purchased_amount'] #.fillna(0)
+#        agg = agg.merge(sold_amounts, on='cik', how='left')
+#        agg['sold_amount'] = agg['sold_amount'] #.fillna(0)
 
         # Ensure both columns exist (in case there were only buys or only sells)
-        for col in ('buy_quantity', 'sell_quantity'):
-            if col not in agg.columns:
-                agg[col] = 0.0
+#        for col in ('buy_quantity', 'sell_quantity'):
+#            if col not in agg.columns:
+#                agg[col] = 0.0
 
         # 3) Compute curr_quantity
-        agg['curr_quantity'] = agg['buy_quantity'] - agg['sell_quantity']
+#        agg['curr_quantity'] = agg['buy_quantity'] - agg['sell_quantity']
 
         # 4) Merge into rankings_df by cik
-        ss.rankings_df = (
-            ss.rankings_df
-            .merge(agg, on='cik', how='left')
-        )
+#        ss.rankings_df = (
+#            ss.rankings_df
+#            .merge(agg, on='cik', how='left')
+#        )
         
-        ss.rankings_df[['curr_quantity']] = (
-            ss.rankings_df[['curr_quantity']]
-            .fillna(0.00)
-        )
-        ss.rankings_df['buy_amount'] = ss.rankings_df['buy_amount'].fillna(0)
-        ss.rankings_df['sold_amount'] = ss.rankings_df['sold_amount'].fillna(0)
-        ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
-        ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['buy_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
-        ss.rankings_df['gain_pct']=((ss.rankings_df['sold_amount']+ss.rankings_df['curr_value'])/ss.rankings_df['buy_amount'])*100-100
+#        ss.rankings_df[['curr_quantity']] = (
+#            ss.rankings_df[['curr_quantity']]
+#            .fillna(0.00)
+#        )
+#        ss.rankings_df['purchased_amount'] = ss.rankings_df['purchased_amount'].fillna(0)
+#        ss.rankings_df['sold_amount'] = ss.rankings_df['sold_amount'].fillna(0)
+#        ss.rankings_df['curr_value']=ss.rankings_df['curr_quantity']*ss.rankings_df['stock_price']
+#        ss.rankings_df['avg_cost']=ss.rankings_df.apply(lambda row: row['purchased_amount']/row['buy_quantity'] if row['buy_quantity'] > 0 else 0, axis=1)
+#        ss.rankings_df['total_return_pct']=((ss.rankings_df['sold_amount']+ss.rankings_df['curr_value'])/ss.rankings_df['purchased_amount'])*100-100
 
-#        ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(0.01, 5000), 'buy_category'] = 'Speculative'
-#        ss.rankings_df.loc[ss.rankings_df['buy_amount'].between(5000.01, 20000), 'buy_category'] = 'Moderate_Investment'
-#        ss.rankings_df.loc[ss.rankings_df['buy_amount'] > 20000, 'buy_category'] = 'Large_Investment'
+#        ss.rankings_df.loc[ss.rankings_df['purchased_amount'].between(0.01, 5000), 'buy_category'] = 'Speculative'
+#        ss.rankings_df.loc[ss.rankings_df['purchased_amount'].between(5000.01, 20000), 'buy_category'] = 'Moderate_Investment'
+#        ss.rankings_df.loc[ss.rankings_df['purchased_amount'] > 20000, 'buy_category'] = 'Large_Investment'
 
         # st.write("ss.rankings_df",ss.rankings_df) #debug
         # st.write(f"the len(ss.rankings_df) is {len(ss.rankings_df)}") #debug
@@ -2727,10 +2744,10 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         ss.editable_stock_growth_analysis_df = ss.rankings_df.merge(editable_stock_data[['cik'] + editable_columns], on='cik', how='left')
     
         ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.reindex(columns=columns)
-        # st.dataframe(editable_stock_growth_analysis_df) # debug     
+        #st.write('editable_stock_growth_analysis_df', ss.editable_stock_growth_analysis_df) # debug     
         ss.editable_stock_growth_analysis_df = ss.editable_stock_growth_analysis_df.sort_values(by='Consolidated_Score', ascending=False)
-        # st.write(f"the len(ss.editable_stock_growth_analysis_df) is {len(ss.editable_stock_growth_analysis_df)}") #debug
-                    
+        # st.write(f"ss.editable_stock_growth_analysis_df after sorting",ss.editable_stock_growth_analysis_df) #debug
+
     @st.cache_data
     def compute_quantiles(df, cols):
         breakpoints = [0.2, 0.4, 0.6, 0.8]
@@ -2752,7 +2769,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         styled = df.style
 
         cols_for_color_inc=[
-                'div_yield', 'gain_pct', 'volume','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
+                'div_yield', 'total_return_pct','Pct_Chg_from_Last_Sold_Price', 'volume','Revenue_Growth_Slope', 'Income_Growth_Slope', 'Margin_Growth_Slope'
                 ,'Revenue_R2','Income_R2','Margin_R2'
                 ,'Revenue_Growth_PCT','Income_Growth_PCT'
                 ,'Revenue_Avg_Residual_Last3','Income_Avg_Residual_Last3','Margin_Avg_Residual_Last3'
@@ -2936,7 +2953,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 selected_datetime = selected_datetime[0] if len(selected_datetime) > 0 else None
             mask &= (ss.editable_stock_growth_analysis_df['last_filing_date'] >= selected_datetime)
     
-    sort_columns=['Consolidated_Score','Pct_Chg_from_7_Days_Ago','Pct_Chg_from_52_Wk_High','buy_amount','curr_value','gain_pct', 'industry', 'sector',
+    sort_columns=['Consolidated_Score','Pct_Chg_from_7_Days_Ago','Pct_Chg_from_52_Wk_High','purchased_amount','sold_amount','current_holdings_value','total_return_pct', 'industry', 'sector',
         'Growth_Quality','Recent_Momentum','Stability_Trend','Value_Pressure', 'trailing_pe', 'forward_pe', 'trailing_ps',
         'Last3Q_Revenue_Growth_PCT', 'Last3Q_Income_Growth_PCT', 'Last3Q_Margin_Growth_PCT', 'Last3Q_Median_Margin_PCT', 'Last3Q_Income_Positive',
         'last_filing_date','last_earnings_date','stock_price_update_datetime', 'Pct_Chg_from_52_Wk_Low']
@@ -2968,7 +2985,7 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         columns = ['chart','action']+[c for c in columns]
     
     if ss.rerun_app==True:
-        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
+#        ss.editable_stock_growth_analysis_df=ss.editable_stock_growth_analysis_df.sort_values(ss.sort_column,ascending=(ss.sort_direction=="Asc"))
         ss.rerun_app=False
     # st.write(f"ss.sort_column={ss.sort_column}") #ss.editable_stock_growth_analysis_df) #debug
         
@@ -3126,6 +3143,9 @@ def display_stock_analysis_form(stock_growth_analysis_df):
         unsafe_allow_html=True,
     )
     
+    # st.write(f"ss.editable_stock_growth_analysis_df",ss.editable_stock_growth_analysis_df) #debug
+
+    
     # header_config = {'header': {'font-weight': 'bold', 'text-align': 'center'}}
     st.data_editor(styled, key="my_editor", on_change=on_change_handle, width='stretch', disabled=disabled_cols
                 # ,hide_index=True
@@ -3142,10 +3162,11 @@ def display_stock_analysis_form(stock_growth_analysis_df):
                 'curr_quantity':st.column_config.NumberColumn(label="Curr Quantity", help="Current Quantity Held", format='%.3f', width="small"),
                 'stock_price': st.column_config.NumberColumn(label="Stock Price", help="Current Stock Price", format='dollar'),
                 'volume': st.column_config.NumberColumn(label="Volume", help="Trading Volume", format='%,.0f', width="small"),
-                'buy_amount':st.column_config.NumberColumn(label="Buy Amount", help="Total Amount Bought", format='dollar', step='int', width="small"),
+                'purchased_amount':st.column_config.NumberColumn(label="Buy Amount", help="Total Amount Bought", format='dollar', step='int', width="small"),
                 'sold_amount':st.column_config.NumberColumn(label="Sold Amount", help="Total Amount Sold", format='dollar', step='int', width="small"),
-                'curr_value':st.column_config.NumberColumn(label="Curr Value", help="Current Value of Holdings", format='dollar', step='int', width="small"),
-                'gain_pct': st.column_config.NumberColumn(label="Gain %", help="Total Gain Percentage on holdings", format='%.1f', width=60),
+                'current_holdings_value':st.column_config.NumberColumn(label="Curr Value", help="Current Value of Holdings", format='dollar', step='int', width="small"),
+                'Pct_Chg_from_Last_Sold_Price':st.column_config.NumberColumn(label="% from Last Sold Price", help="Stock Price change from last sold price", format='%.1f', width="small"),
+                'total_return_pct': st.column_config.NumberColumn(label="Gain %", help="Total Gain Percentage on holdings", format='%.1f', width=60),
                 # 'price_range_52wks': st.column_config.TextColumn(),
                 "notes": st.column_config.TextColumn(label="Notes", help="Editable notes for this stock", pinned=False, width="medium"),
                 'Pct_Chg_from_52_Wk_High':st.column_config.NumberColumn(label="% from 52wk High", help="Percentage change from 52-week high", format='%.1f', width="small"),
